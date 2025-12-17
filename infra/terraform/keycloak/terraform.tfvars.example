@@ -1,7 +1,8 @@
 kc_url = "http://localhost:8080"
 
 kc_admin_client_id     = "admin-cli"
-kc_admin_client_secret = ""
+kc_admin_username      = "admin"
+kc_admin_password      = "admin-pass"
 
 realm         = "books"
 client_id     = "books-api"
