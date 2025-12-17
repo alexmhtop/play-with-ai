@@ -17,4 +17,4 @@ opentelemetry-instrumentation-httpx==0.48b0
 opentelemetry-instrumentation-logging==0.48b0
 opentelemetry-instrumentation-urllib==0.48b0
 pyroscope-io==0.8.14
-ecdsa==0.19.2
+ecdsa==0.19.1
