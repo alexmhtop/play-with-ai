@@ -12,9 +12,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    env:
-      PIP_DISABLE_PIP_VERSION_CHECK: 1
-      PIP_NO_CACHE_DIR: 1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
