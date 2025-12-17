@@ -1,0 +1,70 @@
+server:
+  http_listen_port: 3200
+  grpc_listen_port: 9095
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+        grpc:
+
+ingester:
+  lifecycler:
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+    tokens_file_path: /var/tempo/tokens.json
+  trace_idle_period: 10s
+  max_block_bytes: 1000000
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 24h
+
+querier:
+  frontend_worker:
+    frontend_address: 127.0.0.1:9095
+
+query_frontend:
+  trace_by_id:
+    query_shards: 2
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+
+metrics_generator:
+  ring:
+    kvstore:
+      store: inmemory
+  registry:
+    external_labels:
+      service: tempo
+  processor:
+    local_blocks: {}
+    service_graphs:
+      histogram_buckets: [0.01, 0.1, 0.3, 1, 5]
+    span_metrics:
+      dimensions:
+        - http.method
+        - http.status_code
+        - http.route
+  storage:
+    path: /var/tempo/generator
+    remote_write:
+      - url: http://victoria-metrics:8428/api/v1/write
+
+overrides:
+  max_traces_per_user: 0
+  max_bytes_per_trace: 0
+  metrics_generator_processors:
+    - service-graphs
+    - span-metrics
+  metrics_generator_max_active_series: 10000

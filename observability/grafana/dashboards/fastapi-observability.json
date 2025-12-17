@@ -1,0 +1,72 @@
+{
+  "id": null,
+  "title": "FastAPI Observability",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Request Rate (req/s)",
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_duration_milliseconds_count{job=\"books-api\"}[1m]))",
+          "datasource": "VictoriaMetrics"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "5xx Errors (5m)",
+      "targets": [
+        {
+          "expr": "sum(increase(http_server_duration_milliseconds_count{job=\"books-api\",http_status_code=~\"5..\"}[5m]))",
+          "datasource": "VictoriaMetrics"
+        }
+      ],
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 4 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency p50/p95",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_duration_milliseconds_bucket{job=\"books-api\"}[5m])))",
+          "legendFormat": "p50",
+          "datasource": "VictoriaMetrics"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_duration_milliseconds_bucket{job=\"books-api\"}[5m])))",
+          "legendFormat": "p95",
+          "datasource": "VictoriaMetrics"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 4, "w": 16, "h": 6 }
+    },
+    {
+      "type": "logs",
+      "title": "Recent Logs",
+      "targets": [
+        {
+          "expr": "{service_name=\"books-api\"}",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          }
+        }
+      ],
+      "gridPos": { "x": 0, "y": 10, "w": 16, "h": 8 }
+    },
+    {
+      "type": "trace",
+      "title": "Recent Traces",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": { "x": 0, "y": 18, "w": 16, "h": 8 }
+    }
+  ]
+}

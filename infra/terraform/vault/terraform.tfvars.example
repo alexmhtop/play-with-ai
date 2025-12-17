@@ -1,0 +1,6 @@
+vault_addr = "http://127.0.0.1:8200"
+vault_token = "changeme-root"
+kv_path = "kv"
+
+database_url = "postgresql+psycopg://postgres:postgres@db:5432/postgres"
+books_api_client_secret = "replace-me"

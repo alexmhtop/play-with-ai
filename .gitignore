@@ -22,6 +22,7 @@ pip-wheel-metadata/
 .env.*
 .venv/
 venv/
+.grafana.env
 
 # Coverage / reports
 .coverage
@@ -45,3 +46,4 @@ terraform.tfstate.*
 crash.log
 override.tf
 override.tf.json
+*.tfvars

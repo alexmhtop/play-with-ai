@@ -51,8 +51,110 @@ services:
     networks:
       - app_net
 
+  vault:
+    image: hashicorp/vault:1.17
+    restart: unless-stopped
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN_ID:-root}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_API_ADDR: http://0.0.0.0:8200
+    command: ["server", "-dev", "-dev-root-token-id=${VAULT_DEV_ROOT_TOKEN_ID:-root}", "-dev-listen-address=0.0.0.0:8200"]
+    ports:
+      - "8200:8200"
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    cap_add:
+      - IPC_LOCK
+    networks:
+      - app_net
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.104.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4318:4318"
+    depends_on:
+      tempo:
+        condition: service_started
+      loki:
+        condition: service_started
+      victoria-metrics:
+        condition: service_started
+    networks:
+      - app_net
+
+  tempo:
+    image: grafana/tempo:2.5.0
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    environment:
+      - TEMPO_LOG_LEVEL=info
+    ports:
+      - "3200:3200"
+      - "4317:4317"
+    networks:
+      - app_net
+
+  loki:
+    image: grafana/loki:3.1.1
+    ports:
+      - "3100:3100"
+    command: ["-config.expand-env=true", "-config.file=/etc/loki/local-config.yaml"]
+    networks:
+      - app_net
+
+  victoria-metrics:
+    image: victoriametrics/victoria-metrics:v1.103.0
+    ports:
+      - "8428:8428"
+    networks:
+      - app_net
+
+  grafana:
+    image: grafana/grafana:12.3.1
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      GF_INSTALL_PLUGINS: pyroscope-datasource
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - tempo
+      - loki
+      - victoria-metrics
+    networks:
+      - app_net
+
+  pyroscope:
+    image: grafana/pyroscope:1.11.0
+    command: ["server"]
+    environment:
+      - PYROSCOPE_LOG_LEVEL=info
+      - PYROSCOPE_STORAGE_PATH=/var/lib/pyroscope
+    volumes:
+      - pyroscope-data:/var/lib/pyroscope
+    ports:
+      - "4040:4040"
+    networks:
+      - app_net
+
 volumes:
   db_data:
+  tempo-data:
+  pyroscope-data:
 
 networks:
   app_net:

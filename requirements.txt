@@ -3,3 +3,17 @@ uvicorn[standard]==0.27.1
 python-jose==3.3.0
 httpx==0.27.0
 pydantic-settings==2.2.1
+SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3
+pytest==8.3.3
+alembic==1.14.0
+hypothesis==6.119.4
+bandit==1.7.9
+opentelemetry-api==1.27.0
+opentelemetry-sdk==1.27.0
+opentelemetry-exporter-otlp==1.27.0
+opentelemetry-instrumentation-fastapi==0.48b0
+opentelemetry-instrumentation-httpx==0.48b0
+opentelemetry-instrumentation-logging==0.48b0
+opentelemetry-instrumentation-urllib==0.48b0
+pyroscope-io==0.8.14

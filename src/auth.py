@@ -1,5 +1,5 @@
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, Set
 
 import httpx
 from fastapi import Depends, HTTPException, status
@@ -33,10 +33,20 @@ class JWKSCache:
 
 
 class AuthVerifier:
-    def __init__(self, issuer: str, audience: str, jwks_url: str, cache_ttl_seconds: int = 300):
+    def __init__(
+        self,
+        issuer: str,
+        audience: str,
+        jwks_url: str,
+        cache_ttl_seconds: int = 300,
+        allowed_algs: Iterable[str] | None = None,
+        clock_skew_seconds: int = 30,
+    ):
         self.issuer = issuer
         self.audience = audience
         self.jwks = JWKSCache(jwks_url, cache_ttl_seconds)
+        self.allowed_algs: Set[str] = set(allowed_algs or {"RS256"})
+        self.clock_skew_seconds = clock_skew_seconds
 
     def __call__(self, creds: HTTPAuthorizationCredentials = Depends(bearer)) -> Dict[str, Any]:
         token = creds.credentials
@@ -46,6 +56,12 @@ class AuthVerifier:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token header") from exc
 
         kid = unverified_header.get("kid")
+        typ = unverified_header.get("typ", "JWT")
+        alg = unverified_header.get("alg")
+        if typ.upper() != "JWT":
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+        if alg not in self.allowed_algs:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token algorithm")
         key_data = self.jwks.get_keys().get(kid)
         if not key_data:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown signing key")
@@ -70,7 +86,7 @@ class AuthVerifier:
         if self.audience not in audiences:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bad audience")
 
-        if time.time() > claims.get("exp", 0):
+        if time.time() > claims.get("exp", 0) + self.clock_skew_seconds:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
 
         return claims

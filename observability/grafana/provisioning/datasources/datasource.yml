@@ -1,0 +1,48 @@
+apiVersion: 1
+datasources:
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    isDefault: false
+    jsonData:
+      tracesToLogs:
+        datasourceUid: loki
+        tags: ["service.name", "service_name"]
+        mappedTags:
+          - key: service.name
+            value: service_name
+        spanStartTimeShift: "1h"
+        spanEndTimeShift: "1h"
+        filterByTraceID: true
+      tracesToMetrics:
+        datasourceUid: victoria
+        tags: ["service.name"]
+        spanStartTimeShift: "1h"
+        spanEndTimeShift: "1h"
+      tracesToProfiles:
+        datasourceUid: pyroscope
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      derivedFields:
+        - name: trace_id
+          matcherRegex: "\"trace(?:_id|id)\":\"?([A-Fa-f0-9]{32})"
+          url: "${__value.raw}"
+          datasourceUid: tempo
+  - name: VictoriaMetrics
+    uid: victoria
+    type: prometheus
+    access: proxy
+    url: http://victoria-metrics:8428
+    isDefault: true
+  - name: Pyroscope
+    uid: pyroscope
+    type: grafana-pyroscope-datasource
+    access: proxy
+    url: http://pyroscope:4040
+    jsonData: {}

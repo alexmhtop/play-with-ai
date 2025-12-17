@@ -13,6 +13,8 @@ dist/
 .gitignore
 .cache/
 .coverage
-pytest_cache/
+.pytest_cache/
 .DS_Store
 infra/terraform/
+tests/
+alembic/

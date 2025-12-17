@@ -1,0 +1,53 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  otlphttp/tempo:
+    endpoint: http://tempo:4318
+    tls:
+      insecure: true
+  prometheusremotewrite/victoria:
+    endpoint: http://victoria-metrics:8428/api/v1/write
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    headers:
+      "X-Scope-OrgID": "tenant1"
+  logging:
+    loglevel: warn
+
+processors:
+  batch: {}
+
+connectors:
+  spanmetrics:
+    dimensions:
+      - name: http.method
+      - name: http.route
+      - name: http.status_code
+    aggregation_temporality: AGGREGATION_TEMPORALITY_DELTA
+    exemplars:
+      enabled: true
+    histogram:
+      explicit:
+        buckets: [0.01, 0.05, 0.1, 0.3, 0.6, 1, 3, 6, 10]
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/tempo, spanmetrics, logging]
+    metrics:
+      receivers: [otlp, spanmetrics]
+      processors: [batch]
+      exporters: [prometheusremotewrite/victoria, logging]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [loki, logging]
