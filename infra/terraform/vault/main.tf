@@ -27,7 +27,7 @@ resource "vault_kv_secret_v2" "books_api" {
   delete_all_versions = true
 
   data_json = jsonencode({
-    database_url = var.database_url
+    database_url  = var.database_url
     client_secret = var.books_api_client_secret
   })
 }

@@ -1,6 +1,8 @@
 # Multi-stage build for FastAPI app using uv (no global pip) and non-root runtime
 FROM python:3.12-slim AS builder
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -8,6 +10,7 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     UV_LINK_MODE=copy
 
 # Install toolchain and uv once
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential curl ca-certificates \
     && rm -rf /var/lib/apt/lists/* \

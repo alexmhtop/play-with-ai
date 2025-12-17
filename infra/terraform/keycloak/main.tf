@@ -23,7 +23,7 @@ resource "keycloak_openid_client" "api" {
 }
 
 data "keycloak_openid_client_service_account_user" "api" {
-  realm_id = keycloak_realm.this.id
+  realm_id  = keycloak_realm.this.id
   client_id = keycloak_openid_client.api.id
 }
 
@@ -52,13 +52,13 @@ resource "keycloak_group_roles" "admins_roles" {
 }
 
 resource "keycloak_user" "demo" {
-  realm_id = keycloak_realm.this.id
-  username = "demo"
-  enabled  = true
-  email    = "demo@example.com"
-  email_verified = true
-  first_name = "Demo"
-  last_name  = "User"
+  realm_id         = keycloak_realm.this.id
+  username         = "demo"
+  enabled          = true
+  email            = "demo@example.com"
+  email_verified   = true
+  first_name       = "Demo"
+  last_name        = "User"
   required_actions = []
 
   initial_password {
@@ -68,8 +68,8 @@ resource "keycloak_user" "demo" {
 }
 
 resource "keycloak_user_groups" "api_service_account_groups" {
-  realm_id = keycloak_realm.this.id
-  user_id = data.keycloak_openid_client_service_account_user.api.id
+  realm_id  = keycloak_realm.this.id
+  user_id   = data.keycloak_openid_client_service_account_user.api.id
   group_ids = [keycloak_group.admins.id]
 }
 
