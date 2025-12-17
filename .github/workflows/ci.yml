@@ -11,8 +11,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      APP_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/postgres
-      POSTGRES_HOST: postgres
+      APP_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres
+      POSTGRES_HOST: 127.0.0.1
       POSTGRES_PORT: "5432"
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -30,7 +30,8 @@ jobs:
           --health-cmd="pg_isready -U postgres"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=5
+          --health-retries=10
+          --health-start-period=20s
     permissions:
       contents: read
       id-token: write
@@ -57,25 +58,17 @@ jobs:
 
       - name: Wait for Postgres
         run: |
-          for i in {1..30}; do
-            if pg_isready -h postgres -p 5432 -U postgres; then
+          for i in {1..60}; do
+            if pg_isready -h 127.0.0.1 -p 5432 -U postgres; then
               exit 0
             fi
+            echo "postgres:5432 - no response"
             sleep 2
           done
           echo "Postgres did not become ready" >&2
+          docker ps -a
+          docker logs $(docker ps -aq --filter "name=postgres")
           exit 1
-
-      - name: Write test .env
-        run: |
-          cat > .env <<'EOF'
-          APP_DATABASE_URL=postgresql+psycopg://postgres:postgres@postgres:5432/postgres
-          POSTGRES_HOST=postgres
-          POSTGRES_PORT=5432
-          POSTGRES_USER=postgres
-          POSTGRES_PASSWORD=postgres
-          POSTGRES_DB=postgres
-          EOF
 
       - name: Run tests
         env:
@@ -87,7 +80,7 @@ jobs:
           POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
           POSTGRES_DB: ${{ env.POSTGRES_DB }}
         run: |
-          pg_isready -h postgres -p 5432 -U postgres
+          pg_isready -h 127.0.0.1 -p 5432 -U postgres
           pytest
 
   docker-build:
