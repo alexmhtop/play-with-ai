@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   db:
     image: postgres:16-alpine
@@ -18,35 +16,44 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - app_net
 
   keycloak:
     image: quay.io/keycloak/keycloak:24.0
-    command: start --optimized
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - /opt/keycloak/bin/kc.sh build && /opt/keycloak/bin/kc.sh start --optimized
     restart: unless-stopped
     env_file: .env
     environment:
       KC_DB: postgres
-      KC_DB_URL_HOST: db
-      KC_DB_URL_PORT: 5432
+      KC_DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB}
       KC_DB_USERNAME: ${POSTGRES_USER}
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
-      KC_DB_URL_DATABASE: ${POSTGRES_DB}
+      KC_DB_SCHEMA: public
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       KC_HTTP_ENABLED: "true"
       KC_HTTP_PORT: 8080
       KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-localhost}
-      KC_PROXY_HEADERS: xforwarded
+      KC_PROXY: edge
     depends_on:
       db:
         condition: service_healthy
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
+      test: ["CMD-SHELL", "/opt/keycloak/bin/kc.sh show-config > /dev/null 2>&1"]
       interval: 15s
       timeout: 5s
       retries: 10
+    networks:
+      - app_net
 
 volumes:
   db_data:
+
+networks:
+  app_net:
+    name: play-with-ai

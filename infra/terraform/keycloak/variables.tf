@@ -8,8 +8,13 @@ variable "kc_admin_client_id" {
   type        = string
 }
 
-variable "kc_admin_client_secret" {
-  description = "Admin client secret if required; leave blank for passwordless admin-cli."
+variable "kc_admin_username" {
+  description = "Admin username for password grant."
+  type        = string
+}
+
+variable "kc_admin_password" {
+  description = "Admin password for password grant."
   type        = string
   sensitive   = true
 }

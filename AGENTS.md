@@ -32,3 +32,17 @@ This repo is intentionally lightweight; add new code using the structure below s
 - Never commit secrets; add placeholders to `.env.example` and keep `.env*` ignored.
 - Pin dependencies and document required versions; note any system packages in `docs/setup.md`.
 - Prefer local configuration files over global machine state; surface breaking changes in the changelog or PR description.
+
+## Agent Notes (Keycloak/Terraform)
+- `docker-compose.yml` now uses a named network `play-with-ai` (not the default compose network).
+- Keycloak container runs `/opt/keycloak/bin/kc.sh build` before `kc.sh start --optimized` so Postgres settings are applied correctly.
+- Keycloak healthcheck no longer uses `curl` (the upstream image doesn’t include it); it uses a lightweight `kc.sh` command instead.
+- Terraform config lives in `infra/terraform/keycloak/` and is intended to be the only way we configure realms/clients/roles/users.
+- `infra/terraform/keycloak/main.tf` changes made in this session:
+  - `keycloak_openid_client.api`: `direct_access_grants_enabled = true`, `service_accounts_enabled = true`
+  - `keycloak_user.demo`: initial password is no longer temporary (`temporary = false`)
+- Expected verification after `terraform apply`:
+  - OIDC discovery works: `GET http://127.0.0.1:8080/realms/books/.well-known/openid-configuration`
+  - Client credentials token works for `books-api` and includes `aud=books-api` and realm roles `books:read`/`books:write`.
+  - Password grant should work for `demo` (using `demo_user_password`) without “Account is not fully set up”.
+  - Note: Keycloak may advertise `issuer` as `https://localhost/realms/books`; API JWT validation must use the same issuer value.
