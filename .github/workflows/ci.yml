@@ -162,7 +162,8 @@ jobs:
         uses: anchore/sbom-action@v0.15.4
         with:
           image: local/build:latest
-          output: "sbom.spdx.json"
+          format: spdx-json
+          artifact-name: sbom-spdx
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
