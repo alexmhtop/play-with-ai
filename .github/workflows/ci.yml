@@ -158,11 +158,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: SBOM (syft)
-        uses: anchore/syft-action@v0.4.0
+      - name: SBOM (Syft)
+        uses: anchore/sbom-action@v0.15.4
         with:
           image: local/build:latest
           output: "sbom.spdx.json"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
