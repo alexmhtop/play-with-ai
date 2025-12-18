@@ -135,17 +135,50 @@ jobs:
           exit 1
       - name: Wait for Keycloak
         run: |
-          for i in {1..60}; do
-            if curl -sf http://localhost:8080/realms/books/.well-known/openid-configuration >/dev/null 2>&1; then
+          for i in {1..30}; do
+            if curl -sf http://localhost:8080/realms/master/.well-known/openid-configuration >/dev/null 2>&1; then
               echo "Keycloak is ready"
               exit 0
             fi
-            echo "Keycloak - still waiting (${i})"
-            sleep 3
+            # Check if container is still running
+            if ! docker compose ps keycloak | grep -q "Up"; then
+              echo "Keycloak container is not running!" >&2
+              docker compose ps || true
+              docker compose logs keycloak --tail=50 || true
+              exit 1
+            fi
+            echo "Keycloak - waiting (${i}/30)"
+            docker compose logs keycloak --tail=3 2>/dev/null | tail -1 || true
+            sleep 5
           done
-          echo "Keycloak did not become ready" >&2
+          echo "Keycloak did not become ready after 150s" >&2
           docker compose ps || true
-          docker compose logs keycloak || true
+          docker compose logs keycloak --tail=100 || true
+          exit 1
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+      - name: Create Keycloak realm via Terraform
+        run: |
+          cd infra/terraform/keycloak
+          terraform init
+          terraform apply -auto-approve \
+            -var="kc_url=http://localhost:8080" \
+            -var="kc_admin_client_id=admin-cli" \
+            -var="kc_admin_username=admin" \
+            -var="kc_admin_password=admin-pass" \
+            -var="client_id=books-api" \
+            -var="client_secret=ci-test-secret"
+      - name: Wait for books realm
+        run: |
+          for i in {1..30}; do
+            if curl -sf http://localhost:8080/realms/books/.well-known/openid-configuration >/dev/null 2>&1; then
+              echo "Books realm is ready"
+              exit 0
+            fi
+            echo "Books realm - still waiting (${i})"
+            sleep 2
+          done
+          echo "Books realm did not become ready" >&2
           exit 1
       - name: Install test deps
         run: |
