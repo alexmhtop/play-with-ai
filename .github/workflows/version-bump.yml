@@ -86,6 +86,7 @@ jobs:
           echo "Determined bump type: $BUMP_TYPE"
 
       - name: Calculate new version
+        id: calc
         if: steps.analyze.outputs.should_bump == 'true'
         run: |
           CURRENT="${{ steps.version.outputs.current }}"
@@ -93,7 +94,12 @@ jobs:
 
           MAJOR=$(echo "$CURRENT" | cut -d. -f1)
           MINOR=$(echo "$CURRENT" | cut -d. -f2)
-          PATCH=$(echo "$CURRENT" | cut -d. -f3)
+          PATCH=$(echo "$CURRENT" | cut -d. -f3 | cut -d- -f1)
+
+          # Handle missing parts
+          MAJOR=${MAJOR:-0}
+          MINOR=${MINOR:-0}
+          PATCH=${PATCH:-0}
 
           case "$BUMP_TYPE" in
             major)
@@ -120,102 +126,77 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Create version bump branch
-        run: |
-          BRANCH="version-bump/v${{ needs.determine-bump.outputs.new_version }}"
-          git checkout -b "$BRANCH"
-
       - name: Update version files
+        id: update
         run: |
           NEW_VERSION="${{ needs.determine-bump.outputs.new_version }}"
 
-          # Update pyproject.toml if it exists
-          if [ -f "pyproject.toml" ]; then
+          UPDATED=false
+
+          # Update pyproject.toml if it exists and has version
+          if [ -f "pyproject.toml" ] && grep -q '^version = ' pyproject.toml; then
             sed -i "s/^version = .*/version = \"$NEW_VERSION\"/" pyproject.toml
+            UPDATED=true
           fi
 
           # Update __version__ in src/__init__.py if it exists
-          if [ -f "src/__init__.py" ]; then
+          if [ -f "src/__init__.py" ] && grep -q '__version__' src/__init__.py; then
             sed -i "s/__version__ = .*/__version__ = \"$NEW_VERSION\"/" src/__init__.py
+            UPDATED=true
           fi
 
           # Update VERSION file if it exists
           if [ -f "VERSION" ]; then
             echo "$NEW_VERSION" > VERSION
+            UPDATED=true
           fi
 
           # Update package.json if it exists (for mixed projects)
           if [ -f "package.json" ]; then
             sed -i "s/\"version\": \".*\"/\"version\": \"$NEW_VERSION\"/" package.json
+            UPDATED=true
           fi
 
-          echo "Updated version to $NEW_VERSION"
+          echo "updated=$UPDATED" >> $GITHUB_OUTPUT
+          echo "Updated version to $NEW_VERSION (updated=$UPDATED)"
 
-      - name: Commit and push
-        run: |
-          git add -A
-          if git diff --staged --quiet; then
-            echo "No version files to update"
-          else
-            git commit -m "chore: bump version to v${{ needs.determine-bump.outputs.new_version }}"
-            git push origin "version-bump/v${{ needs.determine-bump.outputs.new_version }}"
-          fi
-
-      - name: Create pull request
-        uses: actions/github-script@v7
+      - name: Create Pull Request
+        if: steps.update.outputs.updated == 'true'
+        uses: peter-evans/create-pull-request@v6
         with:
-          script: |
-            const newVersion = '${{ needs.determine-bump.outputs.new_version }}';
-            const currentVersion = '${{ needs.determine-bump.outputs.current_version }}';
-            const bumpType = '${{ needs.determine-bump.outputs.bump_type }}';
-
-            // Check if PR already exists
-            const { data: prs } = await github.rest.pulls.list({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              head: `${context.repo.owner}:version-bump/v${newVersion}`,
-              state: 'open'
-            });
-
-            if (prs.length > 0) {
-              console.log(`PR already exists: #${prs[0].number}`);
-              return;
-            }
-
-            const pr = await github.rest.pulls.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `chore: bump version to v${newVersion}`,
-              body: `## Version Bump
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: bump version to v${{ needs.determine-bump.outputs.new_version }}"
+          title: "chore: bump version to v${{ needs.determine-bump.outputs.new_version }}"
+          body: |
+            ## Version Bump
 
             | Current | New | Type |
             |---------|-----|------|
-            | v${currentVersion} | v${newVersion} | ${bumpType} |
+            | v${{ needs.determine-bump.outputs.current_version }} | v${{ needs.determine-bump.outputs.new_version }} | ${{ needs.determine-bump.outputs.bump_type }} |
 
             This PR was automatically created based on conventional commit analysis.
 
             ### What's Changed
-            See the commits since v${currentVersion} for details.
+            See the commits since v${{ needs.determine-bump.outputs.current_version }} for details.
 
             ### After Merge
-            A new release will be created automatically with tag \`v${newVersion}\`.
+            A new release will be created automatically with tag `v${{ needs.determine-bump.outputs.new_version }}`.
 
             ---
-            _This PR was created automatically by the version-bump workflow._`,
-              head: `version-bump/v${newVersion}`,
-              base: 'main'
-            });
+            _This PR was created automatically by the version-bump workflow._
+          branch: version-bump/v${{ needs.determine-bump.outputs.new_version }}
+          base: main
+          labels: |
+            version-bump
+            automated
+          delete-branch: true
 
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: pr.data.number,
-              labels: ['version-bump', 'automated']
-            });
-
-            console.log(`Created PR: #${pr.data.number}`);
+      - name: No updates needed
+        if: steps.update.outputs.updated != 'true'
+        run: |
+          echo "## No Version Files Updated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "No version files found to update. Consider creating one of:" >> $GITHUB_STEP_SUMMARY
+          echo "- VERSION file" >> $GITHUB_STEP_SUMMARY
+          echo "- pyproject.toml with version field" >> $GITHUB_STEP_SUMMARY
+          echo "- src/__init__.py with __version__" >> $GITHUB_STEP_SUMMARY
