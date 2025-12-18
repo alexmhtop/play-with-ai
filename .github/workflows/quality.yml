@@ -7,12 +7,17 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   lint_and_test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       APP_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres
       POSTGRES_HOST: 127.0.0.1
@@ -76,6 +81,7 @@ jobs:
 
   integration_and_smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: lint_and_test
     steps:
       - uses: actions/checkout@v4
@@ -233,6 +239,7 @@ jobs:
 
   docker_build_and_scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: lint_and_test
     env:
       IMAGE_NAME: ghcr.io/${{ github.repository }}
@@ -255,6 +262,7 @@ jobs:
 
   terraform_check:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
@@ -272,6 +280,7 @@ jobs:
 
   hadolint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: Hadolint Dockerfile
