@@ -1,9 +1,9 @@
+import logging
 import os
 import uuid
-from typing import List
-
 from contextlib import asynccontextmanager
-import logging
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import metrics, trace
@@ -20,8 +20,8 @@ from .service import BookService
 settings = get_settings()
 
 
-def get_book_service(session=Depends(get_session)) -> BookService:
-    return BookService(session)
+def get_book_service(session: Annotated[object, Depends(get_session)]) -> BookService:
+    return BookService(session)  # type: ignore[arg-type]
 
 
 auth_verifier = AuthVerifier(
@@ -38,10 +38,7 @@ write_access = require_scope("books:write", auth_verifier)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    try:
-        auth_verifier.jwks.get_keys()
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError("Failed to fetch JWKS from configured url") from exc
+    auth_verifier.jwks.get_keys()
     if settings.require_https and not settings.keycloak_issuer.startswith("https://"):
         raise RuntimeError("APP_REQUIRE_HTTPS is true but issuer is not HTTPS")
     yield
@@ -76,8 +73,8 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@router_v1.get("/books", response_model=List[Book], dependencies=[Depends(read_access)])
-def list_books(service: BookService = Depends(get_book_service)) -> List[Book]:
+@router_v1.get("/books", response_model=list[Book], dependencies=[Depends(read_access)])
+def list_books(service: BookService = Depends(get_book_service)) -> list[Book]:
     return service.list()
 
 
@@ -95,7 +92,7 @@ def create_book(payload: CreateBook, service: BookService = Depends(get_book_ser
 def get_book(book_id: int, service: BookService = Depends(get_book_service)) -> Book:
     try:
         return service.get(book_id)
-    except KeyError as exc:  # noqa: BLE001
+    except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found") from exc
 
 
@@ -107,7 +104,7 @@ def get_book(book_id: int, service: BookService = Depends(get_book_service)) -> 
 def update_book(book_id: int, payload: UpdateBook, service: BookService = Depends(get_book_service)) -> Book:
     try:
         return service.update(book_id, payload)
-    except KeyError as exc:  # noqa: BLE001
+    except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found") from exc
 
 
@@ -119,12 +116,12 @@ def update_book(book_id: int, payload: UpdateBook, service: BookService = Depend
 def delete_book(book_id: int, service: BookService = Depends(get_book_service)) -> None:
     try:
         service.delete(book_id)
-    except KeyError as exc:  # noqa: BLE001
+    except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found") from exc
 
 
-@router_v2.get("/books", response_model=List[Book], dependencies=[Depends(read_access)])
-def list_books_v2(service: BookService = Depends(get_book_service)) -> List[Book]:
+@router_v2.get("/books", response_model=list[Book], dependencies=[Depends(read_access)])
+def list_books_v2(service: BookService = Depends(get_book_service)) -> list[Book]:
     # Example behavior change: sorted list in v2
     return sorted(service.list(), key=lambda book: book.title.lower())
 
@@ -148,7 +145,8 @@ async def security_headers(request, call_next):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-    response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+    csp = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+    response.headers.setdefault("Content-Security-Policy", csp)
     response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
     if request.headers.get("authorization"):
         response.headers.setdefault("Cache-Control", "no-store")

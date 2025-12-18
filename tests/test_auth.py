@@ -1,8 +1,7 @@
 import time
-from typing import List
 
-import pytest
 import jwt
+import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from jwt.utils import base64url_encode
@@ -17,7 +16,7 @@ def make_token(secret: bytes, kid: str, issuer: str, audience: str, extra: dict 
 
 
 def test_jwks_cache_uses_cached_keys(monkeypatch):
-    called: List[str] = []
+    called: list[str] = []
     payload = {"keys": [{"kid": "abc", "kty": "oct", "k": base64url_encode(b"secret").decode()}]}
 
     class DummyResponse:

@@ -1,23 +1,22 @@
 import logging
 import os
 
-from opentelemetry import trace
-from opentelemetry import metrics
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+from opentelemetry import metrics, trace
+from opentelemetry._logs import set_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.instrumentation.urllib import URLLibInstrumentor
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry._logs import set_logger_provider
-from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-from opentelemetry.trace import format_trace_id, format_span_id, get_current_span
+from opentelemetry.trace import format_span_id, format_trace_id, get_current_span
 
 
 def _otlp_endpoint() -> str:
@@ -30,7 +29,7 @@ def _configure_pyroscope():
         return
     try:
         import pyroscope  # type: ignore
-    except Exception:  # noqa: BLE001
+    except Exception:
         logging.getLogger(__name__).warning("Pyroscope not installed; profiling disabled")
         return
 
@@ -41,7 +40,7 @@ def _configure_pyroscope():
             server_address=address,
             tags={"service_name": app_name},
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logging.getLogger(__name__).warning("Pyroscope profiling disabled: %s", exc)
 
 

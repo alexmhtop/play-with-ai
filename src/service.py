@@ -1,5 +1,3 @@
-from typing import List
-
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -15,7 +13,7 @@ class BookService:
         self.session.execute(text("TRUNCATE TABLE books RESTART IDENTITY CASCADE;"))
         self.session.commit()
 
-    def list(self) -> List[Book]:
+    def list(self) -> list[Book]:
         records = self.session.execute(select(BookRecord)).scalars().all()
         return [self._to_schema(record) for record in records]
 

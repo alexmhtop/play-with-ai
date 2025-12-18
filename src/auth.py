@@ -1,6 +1,7 @@
 import json
 import time
-from typing import Any, Dict, Iterable, Set
+from collections.abc import Iterable
+from typing import Any
 
 import httpx
 import jwt
@@ -16,10 +17,10 @@ class JWKSCache:
     def __init__(self, url: str, cache_ttl_seconds: int = 300):
         self.url = url
         self.cache_ttl_seconds = cache_ttl_seconds
-        self._keys: Dict[str, Dict[str, Any]] = {}
+        self._keys: dict[str, dict[str, Any]] = {}
         self._exp = 0.0
 
-    def get_keys(self) -> Dict[str, Dict[str, Any]]:
+    def get_keys(self) -> dict[str, dict[str, Any]]:
         now = time.time()
         if self._keys and now < self._exp:
             return self._keys
@@ -47,14 +48,14 @@ class AuthVerifier:
         self.issuer = issuer
         self.audience = audience
         self.jwks = JWKSCache(jwks_url, cache_ttl_seconds)
-        self.allowed_algs: Set[str] = set(allowed_algs or {"RS256"})
+        self.allowed_algs: set[str] = set(allowed_algs or {"RS256"})
         self.clock_skew_seconds = clock_skew_seconds
 
-    def __call__(self, creds: HTTPAuthorizationCredentials = Depends(bearer)) -> Dict[str, Any]:
+    def __call__(self, creds: HTTPAuthorizationCredentials = Depends(bearer)) -> dict[str, Any]:
         token = creds.credentials
         try:
             unverified_header = jwt.get_unverified_header(token)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token header") from exc
 
         kid = unverified_header.get("kid")
@@ -86,14 +87,14 @@ class AuthVerifier:
             )
         except HTTPException:
             raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
 
         return claims
 
 
 def require_scope(scope: str, verifier: AuthVerifier):
-    def dependency(credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> Dict[str, Any]:
+    def dependency(credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> dict[str, Any]:
         claims = verifier(credentials)
         roles = claims.get("realm_access", {}).get("roles", [])
         if scope not in roles:

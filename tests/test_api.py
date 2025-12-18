@@ -1,7 +1,6 @@
-import asyncio
-
-import pytest
 import httpx
+import pytest
+import asyncio
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 

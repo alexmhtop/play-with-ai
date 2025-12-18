@@ -1,4 +1,5 @@
-from typing import Generator, Optional
+from collections.abc import Generator
+from typing import Optional
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker

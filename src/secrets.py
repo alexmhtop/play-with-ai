@@ -1,9 +1,7 @@
-from typing import Dict
-
 import httpx
 
 
-def fetch_vault_secret(*, addr: str, token: str, mount: str, path: str) -> Dict[str, str]:
+def fetch_vault_secret(*, addr: str, token: str, mount: str, path: str) -> dict[str, str]:
     url = f"{addr.rstrip('/')}/v1/{mount}/data/{path.lstrip('/')}"
     headers = {"X-Vault-Token": token}
     with httpx.Client(timeout=5.0) as client:
