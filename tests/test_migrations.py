@@ -13,7 +13,7 @@ def make_cfg(db_url: str) -> Config:
 
 
 def test_migration_upgrade_and_downgrade(tmp_path: Path):
-    db_url = f"sqlite:///{tmp_path/'mig.db'}"
+    db_url = f"sqlite:///{tmp_path / 'mig.db'}"
     cfg = make_cfg(db_url)
 
     command.upgrade(cfg, "head")

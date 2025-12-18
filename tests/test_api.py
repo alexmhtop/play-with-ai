@@ -41,12 +41,8 @@ def overrides(db_session):
 
     app.dependency_overrides[get_session] = _get_test_session
     app.dependency_overrides[get_book_service] = lambda: BookService(db_session)
-    app.dependency_overrides[read_access] = lambda: {
-        "realm_access": {"roles": ["books:read", "books:write"]}
-    }
-    app.dependency_overrides[write_access] = lambda: {
-        "realm_access": {"roles": ["books:read", "books:write"]}
-    }
+    app.dependency_overrides[read_access] = lambda: {"realm_access": {"roles": ["books:read", "books:write"]}}
+    app.dependency_overrides[write_access] = lambda: {"realm_access": {"roles": ["books:read", "books:write"]}}
     yield
     app.dependency_overrides.clear()
 
