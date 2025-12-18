@@ -64,8 +64,8 @@ RUN addgroup --system app && adduser --system --ingroup app app \
 
 WORKDIR /app
 
-# Copy installed deps and binaries from builder
-COPY --from=builder /usr/local/lib/python3.12 /usr/local/lib/python3.12
+# Copy installed deps and binaries from builder (match runtime Python version)
+COPY --from=builder /usr/local/lib/python3.14 /usr/local/lib/python3.14
 COPY --from=builder /usr/local/bin/uvicorn /usr/local/bin/uvicorn
 
 # Copy application code
