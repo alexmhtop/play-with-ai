@@ -26,7 +26,7 @@ jobs:
     outputs:
       bump_type: ${{ steps.analyze.outputs.bump_type }}
       current_version: ${{ steps.version.outputs.current }}
-      new_version: ${{ steps.version.outputs.new }}
+      new_version: ${{ steps.calc.outputs.new }}
       should_bump: ${{ steps.analyze.outputs.should_bump }}
     steps:
       - uses: actions/checkout@v4
@@ -130,6 +130,10 @@ jobs:
         id: update
         run: |
           NEW_VERSION="${{ needs.determine-bump.outputs.new_version }}"
+          if [ -z "$NEW_VERSION" ]; then
+            echo "New version was not calculated; ensure tags exist or calculation step ran" >&2
+            exit 1
+          fi
 
           UPDATED=false
 
