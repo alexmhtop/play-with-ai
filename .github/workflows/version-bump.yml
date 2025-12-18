@@ -160,36 +160,46 @@ jobs:
           echo "updated=$UPDATED" >> $GITHUB_OUTPUT
           echo "Updated version to $NEW_VERSION (updated=$UPDATED)"
 
-      - name: Create Pull Request
+      - name: Configure git
         if: steps.update.outputs.updated == 'true'
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore: bump version to v${{ needs.determine-bump.outputs.new_version }}"
-          title: "chore: bump version to v${{ needs.determine-bump.outputs.new_version }}"
-          body: |
-            ## Version Bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-            | Current | New | Type |
-            |---------|-----|------|
-            | v${{ needs.determine-bump.outputs.current_version }} | v${{ needs.determine-bump.outputs.new_version }} | ${{ needs.determine-bump.outputs.bump_type }} |
+      - name: Commit and push branch
+        if: steps.update.outputs.updated == 'true'
+        id: push
+        run: |
+          BRANCH="version-bump/v${{ needs.determine-bump.outputs.new_version }}"
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "chore: bump version to v${{ needs.determine-bump.outputs.new_version }}"
+          git push origin "$BRANCH"
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
 
-            This PR was automatically created based on conventional commit analysis.
+      - name: Output PR creation link
+        if: steps.update.outputs.updated == 'true'
+        run: |
+          NEW_VERSION="${{ needs.determine-bump.outputs.new_version }}"
+          CURRENT_VERSION="${{ needs.determine-bump.outputs.current_version }}"
+          BUMP_TYPE="${{ needs.determine-bump.outputs.bump_type }}"
+          BRANCH="${{ steps.push.outputs.branch }}"
 
-            ### What's Changed
-            See the commits since v${{ needs.determine-bump.outputs.current_version }} for details.
+          # Create PR URL with pre-filled title and body
+          TITLE="chore: bump version to v${NEW_VERSION}"
+          PR_URL="${{ github.server_url }}/${{ github.repository }}/compare/main...${BRANCH}?expand=1&title=${TITLE}"
 
-            ### After Merge
-            A new release will be created automatically with tag `v${{ needs.determine-bump.outputs.new_version }}`.
-
-            ---
-            _This PR was created automatically by the version-bump workflow._
-          branch: version-bump/v${{ needs.determine-bump.outputs.new_version }}
-          base: main
-          labels: |
-            version-bump
-            automated
-          delete-branch: true
+          echo "## Version Bump Ready" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Current | New | Type |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-----|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| v${CURRENT_VERSION} | v${NEW_VERSION} | ${BUMP_TYPE} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Create Pull Request" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Branch \`${BRANCH}\` has been pushed." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[**Click here to create the PR**](${PR_URL})" >> $GITHUB_STEP_SUMMARY
 
       - name: No updates needed
         if: steps.update.outputs.updated != 'true'
