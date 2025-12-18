@@ -1,0 +1,37 @@
+name: Docs & Links Check
+
+on:
+  pull_request:
+    paths:
+      - 'README.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  link-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Find markdown files
+        id: md
+        run: |
+          FILES="README.md"
+          if [ -d docs ]; then
+            DOCS=$(find docs -name '*.md')
+            FILES="$FILES $DOCS"
+          fi
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+      - name: Lychee link check
+        uses: lycheeverse/lychee-action@v2.3.0
+        with:
+          args: --no-progress --timeout 20 ${{ steps.md.outputs.files }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

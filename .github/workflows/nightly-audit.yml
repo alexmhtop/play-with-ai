@@ -1,0 +1,42 @@
+name: Nightly Dependency Audit
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-audit
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install deps
+        env:
+          UV_NO_SYNC: "1"
+        run: uv pip install --system -r requirements.txt
+      - name: pip-audit
+        run: pip-audit -r requirements.txt
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@v0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

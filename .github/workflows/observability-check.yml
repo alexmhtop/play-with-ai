@@ -1,0 +1,105 @@
+name: Observability Nightly
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: observability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Prepare env
+        run: |
+          if [ -f .env.example ]; then
+            cp .env.example .env
+          fi
+      - name: Start observability stack
+        run: docker compose up -d tempo otel-collector loki victoria-metrics
+      - name: Wait for services
+        run: |
+          sleep 15
+          for i in {1..60}; do
+            if curl -sf http://localhost:3200/ready > /dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+      - name: Install deps
+        env:
+          UV_NO_SYNC: "1"
+        run: uv pip install --system opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp
+      - name: Emit trace and metric
+        run: |
+          python - <<'PY'
+          import json, time, sys, urllib.request
+          from opentelemetry import trace, metrics
+          from opentelemetry.sdk.resources import Resource
+          from opentelemetry.sdk.trace import TracerProvider
+          from opentelemetry.sdk.trace.export import BatchSpanProcessor
+          from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+          from opentelemetry.sdk.metrics import MeterProvider
+          from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+          from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+          from opentelemetry.trace import format_trace_id
+
+          resource = Resource.create({"service.name": "obs-nightly"})
+          tp = TracerProvider(resource=resource)
+          tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint="http://localhost:4318/v1/traces")))
+          trace.set_tracer_provider(tp)
+          tracer = trace.get_tracer(__name__)
+          with tracer.start_as_current_span("nightly-span") as span:
+              tid = format_trace_id(span.get_span_context().trace_id)
+          mp = MeterProvider(
+              resource=resource,
+              metric_readers=[
+                  PeriodicExportingMetricReader(OTLPMetricExporter(endpoint="http://localhost:4318/v1/metrics"))
+              ],
+          )
+          metrics.set_meter_provider(mp)
+          meter = metrics.get_meter("obs-nightly")
+          counter = meter.create_counter("nightly_counter")
+          counter.add(1)
+          mp.shutdown()
+          tp.shutdown()
+          time.sleep(5)
+          data = urllib.request.urlopen(f"http://localhost:3200/api/traces/{tid}").read()
+          parsed = json.loads(data)
+          if "batches" not in parsed:
+              sys.exit("Tempo trace fetch failed")
+          print("Tempo trace ok", tid)
+          # Loki query
+          payload = {"streams": [{"stream": {"app": "obs-nightly"}, "values": [[str(int(time.time()*1e9)), "log"]]}]}
+          req = urllib.request.Request(
+              "http://localhost:3100/loki/api/v1/push",
+              data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json"},
+          )
+          urllib.request.urlopen(req).read()
+          time.sleep(2)
+          q = urllib.request.urlopen("http://localhost:3100/loki/api/v1/query?query={app=\"obs-nightly\"}&limit=1").read()
+          qd = json.loads(q)
+          if not qd.get("data", {}).get("result"):
+              sys.exit("Loki query returned no results")
+          print("Loki log ok")
+          PY
+      - name: Tear down
+        if: always()
+        run: docker compose down

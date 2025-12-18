@@ -1,0 +1,42 @@
+name: Terraform Lint
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'infra/terraform/**'
+  pull_request:
+    paths:
+      - 'infra/terraform/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tflint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+      - name: Install tflint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.55.1
+      - name: Terraform fmt/validate
+        run: |
+          terraform fmt -check -recursive infra/terraform
+          (cd infra/terraform/keycloak && terraform init -backend=false && terraform validate)
+          (cd infra/terraform/vault && terraform init -backend=false && terraform validate)
+      - name: TFLint
+        run: |
+          cd infra/terraform
+          tflint --recursive

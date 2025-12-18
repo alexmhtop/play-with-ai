@@ -1,0 +1,36 @@
+name: Docker Lint & Smoke Build
+
+on:
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dockerlint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+      - name: Build (single-arch smoke)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: local/dockerlint:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
