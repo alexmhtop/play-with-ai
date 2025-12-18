@@ -1,7 +1,7 @@
 import json
 import time
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import jwt
@@ -65,25 +65,31 @@ class AuthVerifier:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
         if alg not in self.allowed_algs:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token algorithm")
+        if not isinstance(kid, str):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing signing key id")
         key_data = self.jwks.get_keys().get(kid)
         if not key_data:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown signing key")
 
         try:
+            key: Any
             if key_data.get("kty") == "oct":
                 # Symmetric JWKS entry: decode shared secret
                 key = base64url_decode(key_data["k"].encode())
             else:
                 key = RSAAlgorithm.from_jwk(json.dumps(key_data))
 
-            claims = jwt.decode(
-                token,
-                key=key,
-                algorithms=list(self.allowed_algs),
-                audience=self.audience,
-                issuer=self.issuer,
-                leeway=self.clock_skew_seconds,
-                options={"require": ["exp", "iss", "aud"]},
+            claims = cast(
+                dict[str, Any],
+                jwt.decode(
+                    token,
+                    key=key,
+                    algorithms=list(self.allowed_algs),
+                    audience=self.audience,
+                    issuer=self.issuer,
+                    leeway=self.clock_skew_seconds,
+                    options={"require": ["exp", "iss", "aud"]},
+                ),
             )
         except HTTPException:
             raise

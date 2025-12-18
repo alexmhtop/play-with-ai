@@ -11,6 +11,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  UV_VERSION: "0.4.21"
+
 jobs:
   changes:
     runs-on: ubuntu-latest
@@ -49,6 +52,7 @@ jobs:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
+      PYTHONPATH: ${{ github.workspace }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -75,24 +79,25 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-          cache: 'pip'
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
         with:
+          version: ${{ env.UV_VERSION }}
           enable-cache: true
 
+      - name: Cache virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ matrix.python-version }}-${{ env.UV_VERSION }}-${{ hashFiles('requirements.txt', 'pyproject.toml') }}
+          restore-keys: |
+            venv-${{ runner.os }}-py${{ matrix.python-version }}-
       - name: Cache APT packages
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: postgresql-client
           version: 1.0
-
-      - name: Install dependencies
-        env:
-          UV_NO_SYNC: "1"
-        run: |
-          uv pip install --system -r requirements.txt
 
       - name: Wait for Postgres
         run: |
@@ -108,12 +113,8 @@ jobs:
           docker logs $(docker ps -aq --filter "name=postgres")
           exit 1
 
-      - name: Run tests (excluding integration)
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          APP_DATABASE_URL: ${{ env.APP_DATABASE_URL }}
-        run: |
-          pytest -m "not integration" --maxfail=1 --cov=src --cov-report=xml
+      - name: Unit tests (matrix)
+        run: make unit PYTEST_ARGS="--maxfail=1 --cov=src --cov-report=xml"
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4

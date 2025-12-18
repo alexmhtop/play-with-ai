@@ -11,6 +11,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  UV_VERSION: "0.4.21"
+
 permissions:
   contents: read
   pull-requests: read
@@ -46,7 +49,7 @@ jobs:
             ci:
               - '.github/workflows/**'
 
-  lint_and_test:
+  lint_and_unit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: changes
@@ -58,6 +61,7 @@ jobs:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
+      PYTHONPATH: ${{ github.workspace }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -79,22 +83,23 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-          cache: 'pip'
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
         with:
+          version: ${{ env.UV_VERSION }}
           enable-cache: true
+      - name: Cache virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ env.UV_VERSION }}-${{ hashFiles('requirements.txt', 'pyproject.toml') }}
+          restore-keys: |
+            venv-${{ runner.os }}-${{ env.UV_VERSION }}-
       - name: Cache APT packages
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: postgresql-client
           version: 1.0
-      - name: Install deps
-        env:
-          UV_NO_SYNC: "1"
-        run: |
-          uv pip install --system -r requirements.txt
-          uv pip install --system pip-audit bandit pytest-cov ruff mypy
       - name: Wait for Postgres
         run: |
           for i in {1..60}; do
@@ -108,11 +113,10 @@ jobs:
           docker ps -a
           docker logs $(docker ps -aq --filter "name=postgres")
           exit 1
+      - name: Lint
+        run: make lint
       - name: Unit tests with coverage
-        run: pytest -m "not integration" --cov=src --cov-report=xml --cov-report=term-missing --cov-fail-under=70
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-          APP_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres
+        run: make unit PYTEST_ARGS="--cov=src --cov-report=xml --cov-report=term-missing --cov-fail-under=70"
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
@@ -126,24 +130,47 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Ruff lint
-        run: ruff check src tests
-      - name: Ruff format check
-        run: ruff format --check src tests
-      - name: Type check (mypy)
-        run: mypy src --ignore-missing-imports --no-error-summary || true
-      - name: Security lint (bandit)
-        run: bandit -q -r src
-      - name: pip-audit
-        run: pip-audit -r requirements.txt
+
+  security_scans:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    needs: [changes, lint_and_unit]
+    if: |
+      (needs.changes.outputs.python == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.lint_and_unit.result == 'success' || needs.lint_and_unit.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ["audit", "security-scan"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Cache virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ env.UV_VERSION }}-${{ hashFiles('requirements.txt', 'pyproject.toml') }}
+          restore-keys: |
+            venv-${{ runner.os }}-${{ env.UV_VERSION }}-
+      - name: Run ${{ matrix.target }}
+        run: make ${{ matrix.target }}
 
   integration_and_smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [changes, lint_and_test]
+    needs: [changes, lint_and_unit, security_scans]
     if: |
       always() &&
-      (needs.lint_and_test.result == 'success' || needs.lint_and_test.result == 'skipped') &&
+      (needs.lint_and_unit.result == 'success' || needs.lint_and_unit.result == 'skipped') &&
+      (needs.security_scans.result == 'success' || needs.security_scans.result == 'skipped') &&
       (needs.changes.outputs.python == 'true' || needs.changes.outputs.docker == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch')
     steps:
       - uses: actions/checkout@v6
@@ -155,6 +182,7 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
         with:
+          version: ${{ env.UV_VERSION }}
           enable-cache: true
       - name: Prepare env
         run: |
@@ -341,10 +369,11 @@ jobs:
   docker_build_and_scan:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [changes, lint_and_test]
+    needs: [changes, lint_and_unit, security_scans]
     if: |
       always() &&
-      (needs.lint_and_test.result == 'success' || needs.lint_and_test.result == 'skipped') &&
+      (needs.lint_and_unit.result == 'success' || needs.lint_and_unit.result == 'skipped') &&
+      (needs.security_scans.result == 'success' || needs.security_scans.result == 'skipped') &&
       (needs.changes.outputs.python == 'true' || needs.changes.outputs.docker == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch')
     env:
       IMAGE_NAME: ghcr.io/${{ github.repository }}
@@ -388,14 +417,17 @@ jobs:
       - name: Cache Terraform providers
         uses: actions/cache@v4
         with:
-          path: infra/terraform/keycloak/.terraform/providers
-          key: terraform-keycloak-${{ hashFiles('infra/terraform/keycloak/.terraform.lock.hcl') }}
+          path: |
+            infra/terraform/keycloak/.terraform/providers
+            infra/terraform/vault/.terraform/providers
+          key: terraform-shared-${{ hashFiles('infra/terraform/keycloak/.terraform.lock.hcl', 'infra/terraform/vault/.terraform.lock.hcl') }}
           restore-keys: |
-            terraform-keycloak-
+            terraform-shared-
       - name: Terraform fmt/validate
         run: |
           terraform fmt -check -recursive infra
           (cd infra/terraform/keycloak && terraform init -backend=false && terraform validate)
+          (cd infra/terraform/vault && terraform init -backend=false && terraform validate)
       - name: tfsec security scan
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
@@ -403,6 +435,66 @@ jobs:
           soft_fail: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  vault_seed_smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [changes, terraform_check]
+    if: needs.changes.outputs.terraform == 'true' || github.event_name == 'workflow_dispatch'
+    env:
+      VAULT_ADDR: http://127.0.0.1:8200
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_TEST_SECRET: ci-test-secret
+    steps:
+      - uses: actions/checkout@v6
+      - name: Start Vault dev server
+        run: |
+          docker run -d --name vault-ci -p 8200:8200 -e VAULT_DEV_ROOT_TOKEN_ID=${VAULT_DEV_ROOT_TOKEN_ID} hashicorp/vault:1.17.6
+      - name: Wait for Vault
+        run: |
+          for i in {1..30}; do
+            if curl -sf ${VAULT_ADDR}/v1/sys/health >/dev/null 2>&1; then
+              exit 0
+            fi
+            echo "vault still starting (${i}/30)"
+            sleep 2
+          done
+          docker logs vault-ci || true
+          exit 1
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+      - name: Cache Terraform providers (vault)
+        uses: actions/cache@v4
+        with:
+          path: infra/terraform/vault/.terraform/providers
+          key: terraform-vault-${{ hashFiles('infra/terraform/vault/.terraform.lock.hcl') }}
+          restore-keys: |
+            terraform-vault-
+      - name: Apply vault seed
+        run: |
+          cd infra/terraform/vault
+          terraform init
+          terraform apply -auto-approve \
+            -var="vault_addr=${VAULT_ADDR}" \
+            -var="vault_token=${VAULT_DEV_ROOT_TOKEN_ID}" \
+            -var="database_url=postgresql+psycopg://postgres:postgres@db:5432/postgres" \
+            -var="books_api_client_secret=${VAULT_TEST_SECRET}"
+      - name: Verify Vault secret exists
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+
+          addr = os.environ['VAULT_ADDR'] + '/v1/kv/data/books-api/config'
+          token = os.environ['VAULT_DEV_ROOT_TOKEN_ID']
+          req = urllib.request.Request(addr, headers={'X-Vault-Token': token})
+          data = json.load(urllib.request.urlopen(req))
+          payload = data['data']['data']
+          if not payload.get('database_url') or payload.get('client_secret') != os.environ['VAULT_TEST_SECRET']:
+              raise SystemExit('Vault secret payload mismatch')
+          PY
+      - name: Cleanup Vault
+        if: always()
+        run: docker rm -f vault-ci
 
   hadolint:
     runs-on: ubuntu-latest

@@ -1,4 +1,5 @@
-from sqlalchemy import Boolean, Column, Float, Integer, String
+from sqlalchemy import Boolean, Float, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
 
@@ -6,9 +7,9 @@ from .db import Base
 class BookRecord(Base):
     __tablename__ = "books"
 
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String(200), nullable=False)
-    author = Column(String(200), nullable=False)
-    price = Column(Float, nullable=False)
-    in_stock = Column(Boolean, default=True, nullable=False)
-    version = Column(Integer, default=1, nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    author: Mapped[str] = mapped_column(String(200), nullable=False)
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    in_stock: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
