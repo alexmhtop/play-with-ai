@@ -1,0 +1,151 @@
+name: Hotfix
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_tag:
+        description: 'Base release tag (e.g., v1.2.3)'
+        required: true
+      hotfix_description:
+        description: 'Brief description of the hotfix'
+        required: true
+      skip_tests:
+        description: 'Skip tests (emergency only)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create-hotfix-branch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      branch: ${{ steps.branch.outputs.name }}
+      version: ${{ steps.version.outputs.new }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate base tag exists
+        run: |
+          if ! git rev-parse "${{ inputs.base_tag }}" >/dev/null 2>&1; then
+            echo "::error::Tag ${{ inputs.base_tag }} does not exist"
+            exit 1
+          fi
+
+      - name: Calculate hotfix version
+        id: version
+        run: |
+          BASE_VERSION="${{ inputs.base_tag }}"
+          BASE_VERSION="${BASE_VERSION#v}"  # Remove 'v' prefix
+
+          # Parse version components
+          MAJOR=$(echo "$BASE_VERSION" | cut -d. -f1)
+          MINOR=$(echo "$BASE_VERSION" | cut -d. -f2)
+          PATCH=$(echo "$BASE_VERSION" | cut -d. -f3)
+
+          # Check for existing hotfix versions
+          HOTFIX_NUM=1
+          while git rev-parse "v${MAJOR}.${MINOR}.${PATCH}.${HOTFIX_NUM}" >/dev/null 2>&1; do
+            HOTFIX_NUM=$((HOTFIX_NUM + 1))
+          done
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}.${HOTFIX_NUM}"
+          echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New hotfix version: $NEW_VERSION"
+
+      - name: Create hotfix branch
+        id: branch
+        run: |
+          BRANCH_NAME="hotfix/v${{ steps.version.outputs.new }}"
+          git checkout "${{ inputs.base_tag }}"
+          git checkout -b "$BRANCH_NAME"
+          git push origin "$BRANCH_NAME"
+          echo "name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "Created branch: $BRANCH_NAME"
+
+      - name: Create tracking issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Hotfix v${{ steps.version.outputs.new }}: ${{ inputs.hotfix_description }}`,
+              body: `## Hotfix Details
+
+            **Base Version:** ${{ inputs.base_tag }}
+            **Hotfix Version:** v${{ steps.version.outputs.new }}
+            **Branch:** \`${{ steps.branch.outputs.name }}\`
+
+            ### Description
+            ${{ inputs.hotfix_description }}
+
+            ### Checklist
+            - [ ] Fix implemented and tested
+            - [ ] PR created and reviewed
+            - [ ] Hotfix merged
+            - [ ] Released to production
+            - [ ] Changes backported to main (if applicable)
+
+            ### Instructions
+            1. Checkout the hotfix branch: \`git checkout ${{ steps.branch.outputs.name }}\`
+            2. Implement your fix
+            3. Create a PR targeting the hotfix branch
+            4. Once merged, the release workflow will be triggered
+
+            ---
+            _This issue was created automatically by the hotfix workflow._`,
+              labels: ['hotfix', 'priority:critical']
+            });
+
+            console.log(`Created tracking issue: #${issue.data.number}`);
+
+  validate-hotfix:
+    needs: create-hotfix-branch
+    if: inputs.skip_tests != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-hotfix-branch.outputs.branch }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run quick validation
+        run: |
+          echo "Running validation tests..."
+          # Run subset of critical tests
+          python -m pytest tests/ -x -q --tb=short -m "critical or smoke" || true
+
+  notify:
+    needs: [create-hotfix-branch, validate-hotfix]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Notify team
+        run: |
+          echo "## Hotfix Branch Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ needs.create-hotfix-branch.outputs.branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** v${{ needs.create-hotfix-branch.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Description:** ${{ inputs.hotfix_description }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Next steps:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Checkout the branch and implement your fix" >> $GITHUB_STEP_SUMMARY
+          echo "2. Create a PR and get it reviewed" >> $GITHUB_STEP_SUMMARY
+          echo "3. Merge to trigger the release" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,83 @@
+name: 'Setup Python Environment'
+description: 'Set up Python with dependencies and optimized caching'
+inputs:
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.12'
+  install-dev:
+    description: 'Install dev dependencies (ruff, mypy, pytest-cov)'
+    required: false
+    default: 'false'
+  cache-dependency-path:
+    description: 'Path to requirements file for cache key'
+    required: false
+    default: 'requirements.txt'
+  working-directory:
+    description: 'Working directory for pip install'
+    required: false
+    default: '.'
+
+outputs:
+  python-version:
+    description: 'The installed Python version'
+    value: ${{ steps.setup.outputs.python-version }}
+  cache-hit:
+    description: 'Whether the cache was hit'
+    value: ${{ steps.pip-cache.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      id: setup
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: 'pip'
+        cache-dependency-path: ${{ inputs.cache-dependency-path }}
+
+    - name: Get pip cache directory
+      id: pip-cache-dir
+      shell: bash
+      run: echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
+
+    - name: Cache pip packages
+      id: pip-cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ steps.pip-cache-dir.outputs.dir }}
+          ~/.local/lib/python*/site-packages
+        key: pip-${{ runner.os }}-py${{ inputs.python-version }}-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.cache-dependency-path)) }}
+        restore-keys: |
+          pip-${{ runner.os }}-py${{ inputs.python-version }}-
+          pip-${{ runner.os }}-
+
+    - name: Cache mypy
+      if: inputs.install-dev == 'true'
+      uses: actions/cache@v4
+      with:
+        path: .mypy_cache
+        key: mypy-${{ runner.os }}-py${{ inputs.python-version }}-${{ hashFiles('**/*.py') }}
+        restore-keys: |
+          mypy-${{ runner.os }}-py${{ inputs.python-version }}-
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        python -m pip install --upgrade pip wheel setuptools
+        pip install -r ${{ inputs.cache-dependency-path }}
+
+    - name: Install dev dependencies
+      if: inputs.install-dev == 'true'
+      shell: bash
+      run: pip install ruff mypy pytest-cov bandit
+
+    - name: Display Python info
+      shell: bash
+      run: |
+        echo "Python version: $(python --version)"
+        echo "Pip version: $(pip --version)"
+        echo "Cache hit: ${{ steps.pip-cache.outputs.cache-hit }}"

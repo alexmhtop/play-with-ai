@@ -50,6 +50,7 @@ This is a FastAPI Books API with Keycloak authentication, Postgres persistence, 
 | `release.yml` | Tags `v*` | Build, sign with Cosign, SBOM, SLSA attestation, GitHub release |
 | `deploy.yml` | Manual/Push | Deploy to staging (auto) or production (manual) |
 | `rollback.yml` | Manual | Quick rollback with incident tracking |
+| `merge-queue.yml` | Merge queue | Validates PRs in merge queue |
 
 ### Security Workflows
 | Workflow | Trigger | Purpose |
@@ -57,22 +58,47 @@ This is a FastAPI Books API with Keycloak authentication, Postgres persistence, 
 | `security-scan.yml` | Weekly | Comprehensive security scans (Trivy, tfsec, Bandit, Semgrep) |
 | `scorecard.yml` | Weekly | OpenSSF Scorecard security metrics |
 | `codeql.yml` | Push/PR | GitHub CodeQL analysis |
+| `license-scan.yml` | PR/Weekly | License compliance checking |
+
+### PR Workflows
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `pr-preview.yml` | PR open/sync | Deploy PR preview environment |
+| `api-breaking-change.yml` | PR | Detect API breaking changes via OpenAPI diff |
+| `migration-safety.yml` | PR | Analyze database migrations for dangerous operations |
+| `changelog-preview.yml` | PR | Preview changelog entries from conventional commits |
+| `labeler.yml` | PR | Auto-label PRs by changed files |
+| `pr-size.yml` | PR | Label PRs by size (XS/S/M/L/XL) |
+
+### Release & Versioning Workflows
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `version-bump.yml` | Push to main | Auto-bump version based on conventional commits |
+| `hotfix.yml` | Manual | Create hotfix branch from release tag |
+| `backport.yml` | PR merged | Auto-backport to maintenance branches |
+| `canary-deploy.yml` | Manual | Canary deployment with traffic shifting |
 
 ### Automation Workflows
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `auto-merge-dependabot.yml` | Dependabot PRs | Auto-merge patch/minor updates |
-| `labeler.yml` | PR | Auto-label PRs by changed files |
-| `pr-size.yml` | PR | Label PRs by size (XS/S/M/L/XL) |
 | `stale.yml` | Daily | Auto-close stale issues (60d) and PRs (30d) |
 | `welcome.yml` | First PR/Issue | Welcome message for new contributors |
 | `notify.yml` | CI failure | Slack/Discord notifications |
 | `benchmark.yml` | Push/PR | Performance benchmarks with Locust |
 | `api-docs.yml` | Push | Generate OpenAPI spec and Redoc docs |
+| `cache-cleanup.yml` | PR closed/Weekly | Clean up stale and orphaned caches |
 
 ### Reusable Workflows
 - `_reusable-python-test.yml`: Parameterized Python testing
 - `_reusable-docker-build.yml`: Parameterized Docker builds
+
+### Composite Actions
+| Action | Purpose |
+|--------|---------|
+| `setup-python-env` | Python setup with optimized caching |
+| `docker-build` | Docker build with Buildx and layer caching |
+| `notify-status` | Send Slack/Discord notifications |
 
 ## Key Configuration
 
@@ -145,7 +171,11 @@ See `docs/BRANCH_PROTECTION.md` for branch protection configuration.
 ├── observability/          # Grafana dashboards, OTEL config
 ├── docs/                   # Documentation
 ├── .github/
-│   ├── workflows/          # CI/CD workflows (24 total)
+│   ├── workflows/          # CI/CD workflows (31 total)
+│   ├── actions/            # Composite actions
+│   │   ├── setup-python-env/  # Python setup with caching
+│   │   ├── docker-build/      # Docker build with Buildx
+│   │   └── notify-status/     # Slack/Discord notifications
 │   ├── ISSUE_TEMPLATE/     # Bug report, feature request templates
 │   ├── CODEOWNERS          # Code ownership for reviews
 │   ├── dependabot.yml      # Dependency update config

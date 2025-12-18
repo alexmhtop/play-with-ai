@@ -1,0 +1,62 @@
+name: 'Notify Status'
+description: 'Send notification about workflow status'
+inputs:
+  status:
+    description: 'Job status (success, failure, cancelled)'
+    required: true
+  title:
+    description: 'Notification title'
+    required: true
+  message:
+    description: 'Additional message'
+    required: false
+    default: ''
+  slack-webhook:
+    description: 'Slack webhook URL'
+    required: false
+  discord-webhook:
+    description: 'Discord webhook URL'
+    required: false
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set emoji
+      id: emoji
+      shell: bash
+      run: |
+        case "${{ inputs.status }}" in
+          success) echo "emoji=✅" >> $GITHUB_OUTPUT ;;
+          failure) echo "emoji=❌" >> $GITHUB_OUTPUT ;;
+          cancelled) echo "emoji=⚠️" >> $GITHUB_OUTPUT ;;
+          *) echo "emoji=ℹ️" >> $GITHUB_OUTPUT ;;
+        esac
+
+    - name: Send Slack notification
+      if: inputs.slack-webhook != ''
+      shell: bash
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{
+            "text": "${{ steps.emoji.outputs.emoji }} ${{ inputs.title }}",
+            "blocks": [
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "${{ steps.emoji.outputs.emoji }} *${{ inputs.title }}*\n${{ inputs.message }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+                }
+              }
+            ]
+          }' \
+          "${{ inputs.slack-webhook }}"
+
+    - name: Send Discord notification
+      if: inputs.discord-webhook != ''
+      shell: bash
+      run: |
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{
+            "content": "${{ steps.emoji.outputs.emoji }} **${{ inputs.title }}**\n${{ inputs.message }}\n[View Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          }' \
+          "${{ inputs.discord-webhook }}"

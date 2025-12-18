@@ -1,0 +1,208 @@
+name: Database Migration Safety
+
+on:
+  pull_request:
+    paths:
+      - 'alembic/**'
+      - 'src/entities.py'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APP_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/postgres
+    services:
+      postgres:
+        image: postgres:16-alpine
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install sqlparse
+
+      - name: Get changed migration files
+        id: changes
+        run: |
+          MIGRATIONS=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD -- 'alembic/versions/*.py' | tr '\n' ' ')
+          echo "migrations=$MIGRATIONS" >> $GITHUB_OUTPUT
+          echo "Found migrations: $MIGRATIONS"
+
+      - name: Analyze migrations for dangerous operations
+        id: analyze
+        run: |
+          cat > analyze_migrations.py << 'PYEOF'
+          import sys
+          import re
+          import json
+
+          DANGEROUS_PATTERNS = [
+              (r'\bDROP\s+TABLE\b', 'DROP TABLE', 'high', 'Drops entire table - data loss!'),
+              (r'\bDROP\s+COLUMN\b', 'DROP COLUMN', 'high', 'Drops column - data loss!'),
+              (r'\bTRUNCATE\b', 'TRUNCATE', 'high', 'Truncates table - data loss!'),
+              (r'\bDELETE\s+FROM\b(?!.*\bWHERE\b)', 'DELETE without WHERE', 'high', 'Deletes all rows!'),
+              (r'\bALTER\s+COLUMN\b.*\bTYPE\b', 'ALTER COLUMN TYPE', 'medium', 'May cause data conversion issues'),
+              (r'\bRENAME\s+(TABLE|COLUMN)\b', 'RENAME', 'medium', 'May break application code'),
+              (r'\bNOT\s+NULL\b', 'NOT NULL constraint', 'medium', 'May fail if NULL values exist'),
+              (r'\bDROP\s+INDEX\b', 'DROP INDEX', 'low', 'May impact query performance'),
+              (r'\bDROP\s+CONSTRAINT\b', 'DROP CONSTRAINT', 'medium', 'Removes data integrity check'),
+          ]
+
+          def analyze_file(filepath):
+              issues = []
+              try:
+                  with open(filepath, 'r') as f:
+                      content = f.read()
+
+                  for pattern, name, severity, description in DANGEROUS_PATTERNS:
+                      matches = re.findall(pattern, content, re.IGNORECASE)
+                      if matches:
+                          issues.append({
+                              'file': filepath,
+                              'operation': name,
+                              'severity': severity,
+                              'description': description,
+                              'count': len(matches)
+                          })
+              except Exception as e:
+                  issues.append({
+                      'file': filepath,
+                      'operation': 'ERROR',
+                      'severity': 'high',
+                      'description': str(e),
+                      'count': 1
+                  })
+              return issues
+
+          if __name__ == '__main__':
+              all_issues = []
+              for filepath in sys.argv[1:]:
+                  if filepath.strip():
+                      all_issues.extend(analyze_file(filepath.strip()))
+
+              print(json.dumps(all_issues, indent=2))
+          PYEOF
+
+          python analyze_migrations.py ${{ steps.changes.outputs.migrations }} > migration_issues.json
+
+          # Check for high severity issues
+          HIGH_COUNT=$(cat migration_issues.json | python -c "import sys,json; issues=json.load(sys.stdin); print(len([i for i in issues if i['severity']=='high']))")
+          echo "high_severity_count=$HIGH_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Test migration up/down
+        id: test
+        run: |
+          # Apply all migrations
+          python -m alembic upgrade head
+          echo "✅ Upgrade successful"
+
+          # Test downgrade
+          python -m alembic downgrade -1
+          echo "✅ Downgrade successful"
+
+          # Re-apply
+          python -m alembic upgrade head
+          echo "✅ Re-upgrade successful"
+        continue-on-error: true
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let issues = [];
+            try {
+              issues = JSON.parse(fs.readFileSync('migration_issues.json', 'utf8'));
+            } catch (e) {}
+
+            const testPassed = '${{ steps.test.outcome }}' === 'success';
+            const highCount = parseInt('${{ steps.analyze.outputs.high_severity_count }}') || 0;
+
+            let body = '## 🗄️ Migration Safety Check\n\n';
+
+            // Test results
+            if (testPassed) {
+              body += '### ✅ Migration Test: Passed\n\n';
+              body += 'Upgrade → Downgrade → Upgrade cycle completed successfully.\n\n';
+            } else {
+              body += '### ❌ Migration Test: Failed\n\n';
+              body += 'The migration upgrade/downgrade cycle failed. Please check the workflow logs.\n\n';
+            }
+
+            // Dangerous operations
+            if (issues.length > 0) {
+              body += '### ⚠️ Potentially Dangerous Operations\n\n';
+              body += '| Severity | Operation | Description | File |\n';
+              body += '|----------|-----------|-------------|------|\n';
+
+              for (const issue of issues) {
+                const icon = issue.severity === 'high' ? '🔴' : issue.severity === 'medium' ? '🟡' : '🟢';
+                body += `| ${icon} ${issue.severity} | ${issue.operation} | ${issue.description} | \`${issue.file}\` |\n`;
+              }
+              body += '\n';
+
+              if (highCount > 0) {
+                body += '> **⚠️ High severity operations detected!** Please ensure these changes are intentional and have been reviewed.\n\n';
+              }
+            } else {
+              body += '### ✅ No Dangerous Operations Detected\n\n';
+            }
+
+            body += '### 📋 Migration Checklist\n\n';
+            body += '- [ ] Migrations are backward compatible\n';
+            body += '- [ ] Downgrade path has been tested\n';
+            body += '- [ ] Data migration script prepared (if needed)\n';
+            body += '- [ ] Deployment plan accounts for migration time\n';
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Migration Safety Check')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
+            }

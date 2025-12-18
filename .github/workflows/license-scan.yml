@@ -1,0 +1,350 @@
+name: License Compliance
+
+on:
+  pull_request:
+    paths:
+      - 'requirements*.txt'
+      - 'pyproject.toml'
+      - 'poetry.lock'
+      - 'Pipfile.lock'
+  push:
+    branches: [main]
+    paths:
+      - 'requirements*.txt'
+      - 'pyproject.toml'
+      - 'poetry.lock'
+      - 'Pipfile.lock'
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sunday
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+env:
+  # Approved licenses (SPDX identifiers)
+  APPROVED_LICENSES: |
+    MIT
+    Apache-2.0
+    BSD-2-Clause
+    BSD-3-Clause
+    ISC
+    PSF-2.0
+    Python-2.0
+    Unlicense
+    CC0-1.0
+    WTFPL
+    MPL-2.0
+    LGPL-2.1
+    LGPL-3.0
+
+  # Denied licenses
+  DENIED_LICENSES: |
+    GPL-2.0
+    GPL-3.0
+    AGPL-3.0
+    SSPL-1.0
+    BUSL-1.1
+
+jobs:
+  scan-licenses:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pip-licenses liccheck
+
+      - name: Generate license report
+        id: licenses
+        run: |
+          # Generate detailed license report
+          pip-licenses --format=json --with-urls --with-description > licenses.json
+          pip-licenses --format=markdown --with-urls > licenses.md
+
+          # Generate summary
+          pip-licenses --format=csv > licenses.csv
+
+          # Count by license
+          echo "## License Summary" > license-summary.md
+          echo "" >> license-summary.md
+          pip-licenses --summary >> license-summary.md
+
+          # Check for unknown licenses
+          UNKNOWN=$(pip-licenses --format=json | jq '[.[] | select(.License == "UNKNOWN")] | length')
+          echo "unknown_count=$UNKNOWN" >> $GITHUB_OUTPUT
+
+      - name: Check license compliance
+        id: compliance
+        run: |
+          cat > .liccheck.ini << 'EOF'
+          [Licenses]
+          authorized_licenses:
+            MIT
+            Apache Software License
+            Apache 2.0
+            Apache-2.0
+            BSD
+            BSD License
+            BSD-2-Clause
+            BSD-3-Clause
+            ISC
+            ISC License
+            Python Software Foundation License
+            PSF
+            Mozilla Public License 2.0
+            MPL-2.0
+            LGPL
+            GNU Lesser General Public License v2 or later (LGPLv2+)
+            GNU Lesser General Public License v3 (LGPLv3)
+            Public Domain
+            Unlicense
+            CC0 1.0 Universal
+
+          unauthorized_licenses:
+            GPL v2
+            GPL v3
+            GNU General Public License v2 (GPLv2)
+            GNU General Public License v3 (GPLv3)
+            AGPL
+            GNU Affero General Public License v3
+
+          [Authorized Packages]
+          # Packages with non-standard licenses that are pre-approved
+
+          [Unauthorized Packages]
+          # Packages that are explicitly denied
+          EOF
+
+          set +e
+          liccheck -s .liccheck.ini -r requirements.txt > compliance-report.txt 2>&1
+          RESULT=$?
+          set -e
+
+          if [ $RESULT -eq 0 ]; then
+            echo "status=pass" >> $GITHUB_OUTPUT
+            echo "✅ All licenses are compliant"
+          else
+            echo "status=fail" >> $GITHUB_OUTPUT
+            echo "❌ License compliance issues found"
+            cat compliance-report.txt
+          fi
+
+      - name: Scan with Trivy for licenses
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          scanners: 'license'
+          format: 'json'
+          output: 'trivy-licenses.json'
+        continue-on-error: true
+
+      - name: Generate compliance report
+        id: report
+        run: |
+          cat > generate_report.py << 'PYEOF'
+          import json
+          import sys
+
+          # Load license data
+          with open('licenses.json') as f:
+              licenses = json.load(f)
+
+          # Categorize packages
+          approved = []
+          review_needed = []
+          denied = []
+          unknown = []
+
+          APPROVED = {'MIT', 'Apache-2.0', 'Apache Software License', 'BSD', 'BSD-2-Clause',
+                      'BSD-3-Clause', 'ISC', 'PSF-2.0', 'Python Software Foundation License',
+                      'Unlicense', 'CC0-1.0', 'MPL-2.0', 'LGPL', 'Public Domain'}
+
+          DENIED = {'GPL-2.0', 'GPL-3.0', 'AGPL-3.0', 'GNU General Public License v2',
+                    'GNU General Public License v3', 'GNU Affero General Public License'}
+
+          for pkg in licenses:
+              license_name = pkg.get('License', 'UNKNOWN')
+              entry = {
+                  'name': pkg.get('Name', 'unknown'),
+                  'version': pkg.get('Version', ''),
+                  'license': license_name,
+                  'url': pkg.get('URL', '')
+              }
+
+              if license_name == 'UNKNOWN':
+                  unknown.append(entry)
+              elif any(d in license_name for d in DENIED):
+                  denied.append(entry)
+              elif any(a in license_name for a in APPROVED):
+                  approved.append(entry)
+              else:
+                  review_needed.append(entry)
+
+          result = {
+              'approved': len(approved),
+              'review_needed': len(review_needed),
+              'denied': len(denied),
+              'unknown': len(unknown),
+              'packages': {
+                  'approved': approved,
+                  'review_needed': review_needed,
+                  'denied': denied,
+                  'unknown': unknown
+              }
+          }
+
+          print(json.dumps(result, indent=2))
+
+          # Exit with error if denied licenses found
+          if denied:
+              sys.exit(1)
+          PYEOF
+
+          python generate_report.py > license-report.json 2>&1 || true
+
+          # Extract counts
+          APPROVED=$(jq '.approved' license-report.json 2>/dev/null || echo "0")
+          REVIEW=$(jq '.review_needed' license-report.json 2>/dev/null || echo "0")
+          DENIED=$(jq '.denied' license-report.json 2>/dev/null || echo "0")
+          UNKNOWN=$(jq '.unknown' license-report.json 2>/dev/null || echo "0")
+
+          echo "approved=$APPROVED" >> $GITHUB_OUTPUT
+          echo "review_needed=$REVIEW" >> $GITHUB_OUTPUT
+          echo "denied=$DENIED" >> $GITHUB_OUTPUT
+          echo "unknown=$UNKNOWN" >> $GITHUB_OUTPUT
+
+      - name: Upload license artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-reports
+          path: |
+            licenses.json
+            licenses.md
+            license-summary.md
+            license-report.json
+            compliance-report.txt
+            trivy-licenses.json
+          retention-days: 30
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let report = { approved: 0, review_needed: 0, denied: 0, unknown: 0, packages: {} };
+            try {
+              report = JSON.parse(fs.readFileSync('license-report.json', 'utf8'));
+            } catch (e) {}
+
+            const complianceStatus = '${{ steps.compliance.outputs.status }}';
+            const statusEmoji = complianceStatus === 'pass' ? '✅' : '❌';
+
+            let body = `## 📜 License Compliance Report
+
+            ### ${statusEmoji} Status: ${complianceStatus === 'pass' ? 'Compliant' : 'Issues Found'}
+
+            | Category | Count |
+            |----------|-------|
+            | ✅ Approved | ${report.approved} |
+            | 🔍 Review Needed | ${report.review_needed} |
+            | ❌ Denied | ${report.denied} |
+            | ❓ Unknown | ${report.unknown} |
+
+            `;
+
+            if (report.denied > 0 && report.packages.denied) {
+              body += `### ❌ Denied Licenses
+
+            The following packages use licenses that are not approved:
+
+            | Package | Version | License |
+            |---------|---------|---------|
+            `;
+              for (const pkg of report.packages.denied) {
+                body += `| ${pkg.name} | ${pkg.version} | ${pkg.license} |\n`;
+              }
+              body += '\n';
+            }
+
+            if (report.review_needed > 0 && report.packages.review_needed) {
+              body += `### 🔍 Packages Requiring Review
+
+            <details>
+            <summary>Click to expand (${report.review_needed} packages)</summary>
+
+            | Package | Version | License |
+            |---------|---------|---------|
+            `;
+              for (const pkg of report.packages.review_needed.slice(0, 20)) {
+                body += `| ${pkg.name} | ${pkg.version} | ${pkg.license} |\n`;
+              }
+              if (report.packages.review_needed.length > 20) {
+                body += `\n_...and ${report.packages.review_needed.length - 20} more_\n`;
+              }
+              body += `</details>\n\n`;
+            }
+
+            if (report.unknown > 0 && report.packages.unknown) {
+              body += `### ❓ Unknown Licenses
+
+            <details>
+            <summary>Click to expand (${report.unknown} packages)</summary>
+
+            | Package | Version |
+            |---------|---------|
+            `;
+              for (const pkg of report.packages.unknown) {
+                body += `| ${pkg.name} | ${pkg.version} |\n`;
+              }
+              body += `</details>\n\n`;
+            }
+
+            body += `---
+            _Full license report available in workflow artifacts._`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('License Compliance Report')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
+            }
+
+      - name: Fail on denied licenses
+        if: steps.report.outputs.denied > 0
+        run: |
+          echo "::error::Denied licenses found in dependencies"
+          exit 1

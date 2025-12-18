@@ -1,0 +1,185 @@
+name: Changelog Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  preview-changelog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install git-cliff
+        run: |
+          curl -sSfL https://github.com/orhun/git-cliff/releases/download/v2.4.0/git-cliff-2.4.0-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          sudo mv git-cliff-*/git-cliff /usr/local/bin/
+          git-cliff --version
+
+      - name: Generate changelog preview
+        id: changelog
+        run: |
+          # Get base branch
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
+
+          # Generate changelog for commits in this PR
+          CHANGELOG=$(git-cliff origin/${BASE_REF}..HEAD --unreleased --strip header 2>/dev/null || echo "")
+
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="No conventional commits found in this PR."
+          fi
+
+          # Save to file for the comment step
+          echo "$CHANGELOG" > changelog-preview.md
+
+          # Also output for summary
+          echo "## Changelog Preview" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "$CHANGELOG" >> $GITHUB_STEP_SUMMARY
+
+      - name: Analyze commit types
+        id: analyze
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
+
+          # Count commit types
+          FEAT=$(git log origin/${BASE_REF}..HEAD --oneline | grep -ciE '^[a-f0-9]+ feat' || echo "0")
+          FIX=$(git log origin/${BASE_REF}..HEAD --oneline | grep -ciE '^[a-f0-9]+ fix' || echo "0")
+          DOCS=$(git log origin/${BASE_REF}..HEAD --oneline | grep -ciE '^[a-f0-9]+ docs' || echo "0")
+          CHORE=$(git log origin/${BASE_REF}..HEAD --oneline | grep -ciE '^[a-f0-9]+ chore' || echo "0")
+          REFACTOR=$(git log origin/${BASE_REF}..HEAD --oneline | grep -ciE '^[a-f0-9]+ refactor' || echo "0")
+          TEST=$(git log origin/${BASE_REF}..HEAD --oneline | grep -ciE '^[a-f0-9]+ test' || echo "0")
+          BREAKING=$(git log origin/${BASE_REF}..HEAD --oneline | grep -ciE '(BREAKING CHANGE|!:)' || echo "0")
+          OTHER=$(git log origin/${BASE_REF}..HEAD --oneline | grep -cvE '^[a-f0-9]+ (feat|fix|docs|chore|refactor|test|ci|style|perf|build)' || echo "0")
+
+          echo "feat=$FEAT" >> $GITHUB_OUTPUT
+          echo "fix=$FIX" >> $GITHUB_OUTPUT
+          echo "docs=$DOCS" >> $GITHUB_OUTPUT
+          echo "chore=$CHORE" >> $GITHUB_OUTPUT
+          echo "refactor=$REFACTOR" >> $GITHUB_OUTPUT
+          echo "test=$TEST" >> $GITHUB_OUTPUT
+          echo "breaking=$BREAKING" >> $GITHUB_OUTPUT
+          echo "other=$OTHER" >> $GITHUB_OUTPUT
+
+      - name: Determine version impact
+        id: impact
+        run: |
+          BREAKING="${{ steps.analyze.outputs.breaking }}"
+          FEAT="${{ steps.analyze.outputs.feat }}"
+          FIX="${{ steps.analyze.outputs.fix }}"
+
+          if [ "$BREAKING" -gt 0 ]; then
+            echo "type=major" >> $GITHUB_OUTPUT
+            echo "emoji=🚨" >> $GITHUB_OUTPUT
+            echo "label=MAJOR" >> $GITHUB_OUTPUT
+          elif [ "$FEAT" -gt 0 ]; then
+            echo "type=minor" >> $GITHUB_OUTPUT
+            echo "emoji=✨" >> $GITHUB_OUTPUT
+            echo "label=MINOR" >> $GITHUB_OUTPUT
+          elif [ "$FIX" -gt 0 ]; then
+            echo "type=patch" >> $GITHUB_OUTPUT
+            echo "emoji=🐛" >> $GITHUB_OUTPUT
+            echo "label=PATCH" >> $GITHUB_OUTPUT
+          else
+            echo "type=none" >> $GITHUB_OUTPUT
+            echo "emoji=📝" >> $GITHUB_OUTPUT
+            echo "label=NO VERSION CHANGE" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let changelog = 'No conventional commits found.';
+            try {
+              changelog = fs.readFileSync('changelog-preview.md', 'utf8');
+            } catch (e) {}
+
+            const stats = {
+              feat: parseInt('${{ steps.analyze.outputs.feat }}') || 0,
+              fix: parseInt('${{ steps.analyze.outputs.fix }}') || 0,
+              docs: parseInt('${{ steps.analyze.outputs.docs }}') || 0,
+              chore: parseInt('${{ steps.analyze.outputs.chore }}') || 0,
+              refactor: parseInt('${{ steps.analyze.outputs.refactor }}') || 0,
+              test: parseInt('${{ steps.analyze.outputs.test }}') || 0,
+              breaking: parseInt('${{ steps.analyze.outputs.breaking }}') || 0,
+              other: parseInt('${{ steps.analyze.outputs.other }}') || 0
+            };
+
+            const impact = {
+              type: '${{ steps.impact.outputs.type }}',
+              emoji: '${{ steps.impact.outputs.emoji }}',
+              label: '${{ steps.impact.outputs.label }}'
+            };
+
+            let body = `## 📋 Changelog Preview
+
+            ### ${impact.emoji} Version Impact: **${impact.label}**
+
+            `;
+
+            // Add stats table if there are commits
+            const totalCommits = Object.values(stats).reduce((a, b) => a + b, 0);
+            if (totalCommits > 0) {
+              body += `| Type | Count |
+            |------|-------|
+            `;
+              if (stats.breaking > 0) body += `| 🚨 Breaking | ${stats.breaking} |\n`;
+              if (stats.feat > 0) body += `| ✨ Features | ${stats.feat} |\n`;
+              if (stats.fix > 0) body += `| 🐛 Bug Fixes | ${stats.fix} |\n`;
+              if (stats.docs > 0) body += `| 📚 Docs | ${stats.docs} |\n`;
+              if (stats.refactor > 0) body += `| ♻️ Refactor | ${stats.refactor} |\n`;
+              if (stats.test > 0) body += `| 🧪 Tests | ${stats.test} |\n`;
+              if (stats.chore > 0) body += `| 🔧 Chores | ${stats.chore} |\n`;
+              if (stats.other > 0) body += `| 📝 Other | ${stats.other} |\n`;
+
+              body += '\n';
+            }
+
+            body += `### Preview
+
+            <details>
+            <summary>Click to expand changelog</summary>
+
+            ${changelog}
+
+            </details>
+
+            ---
+            _This preview is generated from [conventional commits](https://www.conventionalcommits.org/). Non-conventional commits may not appear._`;
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Changelog Preview')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
+            }

@@ -1,0 +1,186 @@
+name: Backport
+
+on:
+  pull_request:
+    types: [closed, labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  backport:
+    if: |
+      github.event.pull_request.merged == true &&
+      contains(toJson(github.event.pull_request.labels.*.name), 'backport')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract backport targets
+        id: targets
+        run: |
+          # Extract target branches from labels like "backport:v1.x" or "backport:release-2.0"
+          LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
+          TARGETS=$(echo "$LABELS" | jq -r '.[] | select(startswith("backport:")) | sub("backport:"; "")')
+
+          if [ -z "$TARGETS" ]; then
+            echo "::warning::No backport target branches found in labels"
+            echo "targets=" >> $GITHUB_OUTPUT
+          else
+            # Convert to JSON array for matrix
+            TARGETS_JSON=$(echo "$TARGETS" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+            echo "targets=$TARGETS_JSON" >> $GITHUB_OUTPUT
+            echo "Found backport targets: $TARGETS"
+          fi
+
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+
+  create-backport-pr:
+    needs: backport
+    if: needs.backport.outputs.targets != '' && needs.backport.outputs.targets != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.backport.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create backport branch
+        id: backport
+        run: |
+          TARGET_BRANCH="${{ matrix.target }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          MERGE_COMMIT="${{ github.event.pull_request.merge_commit_sha }}"
+
+          BACKPORT_BRANCH="backport/${PR_NUMBER}-to-${TARGET_BRANCH}"
+
+          # Verify target branch exists
+          if ! git rev-parse "origin/${TARGET_BRANCH}" >/dev/null 2>&1; then
+            echo "::error::Target branch ${TARGET_BRANCH} does not exist"
+            exit 1
+          fi
+
+          # Create backport branch from target
+          git checkout -b "$BACKPORT_BRANCH" "origin/${TARGET_BRANCH}"
+
+          # Cherry-pick the merge commit
+          if git cherry-pick -x "$MERGE_COMMIT" --strategy=recursive -X theirs; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "Cherry-pick successful"
+          else
+            # Handle conflicts
+            echo "status=conflict" >> $GITHUB_OUTPUT
+            echo "::warning::Cherry-pick had conflicts, creating PR with conflict markers"
+
+            # Stage conflicted files
+            git add -A
+            git commit -m "backport: PR #${PR_NUMBER} to ${TARGET_BRANCH} (conflicts)"
+          fi
+
+          git push origin "$BACKPORT_BRANCH"
+          echo "branch=$BACKPORT_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Create backport PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const targetBranch = '${{ matrix.target }}';
+            const originalPR = ${{ github.event.pull_request.number }};
+            const backportBranch = '${{ steps.backport.outputs.branch }}';
+            const hasConflicts = '${{ steps.backport.outputs.status }}' === 'conflict';
+
+            let body = `## Backport of #${originalPR} to \`${targetBranch}\`
+
+            This is an automated backport of PR #${originalPR}.
+
+            **Original PR:** #${originalPR}
+            **Original Title:** ${{ github.event.pull_request.title }}
+            **Target Branch:** \`${targetBranch}\`
+            `;
+
+            if (hasConflicts) {
+              body += `
+            ### ⚠️ Conflicts Detected
+
+            This backport had merge conflicts that need manual resolution.
+            Please review the changes carefully and resolve any conflicts.
+            `;
+            }
+
+            body += `
+            ---
+            _This PR was created automatically by the backport workflow._`;
+
+            const labels = ['backport'];
+            if (hasConflicts) {
+              labels.push('needs-attention');
+            }
+
+            const pr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Backport ${targetBranch}] ${{ github.event.pull_request.title }}`,
+              body: body,
+              head: backportBranch,
+              base: targetBranch
+            });
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.data.number,
+              labels: labels
+            });
+
+            // Request review from original PR author
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.data.number,
+                reviewers: ['${{ github.event.pull_request.user.login }}']
+              });
+            } catch (e) {
+              console.log('Could not request review:', e.message);
+            }
+
+            console.log(`Created backport PR: #${pr.data.number}`);
+
+            // Comment on original PR
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: originalPR,
+              body: `🔙 Backport PR created for \`${targetBranch}\`: #${pr.data.number}${hasConflicts ? ' (has conflicts)' : ''}`
+            });
+
+  notify-failure:
+    needs: [backport, create-backport-pr]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Comment on PR about failure
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ github.event.pull_request.number }},
+              body: '❌ Backport workflow failed. Please check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.'
+            });

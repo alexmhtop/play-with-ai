@@ -1,0 +1,180 @@
+name: API Breaking Change Detection
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'openapi.json'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  detect-breaking-changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APP_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/postgres
+      APP_KEYCLOAK_ISSUER: https://localhost/realms/books
+      APP_JWKS_URL: http://localhost:8080/realms/books/protocol/openid-connect/certs
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          path: pr
+
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r pr/requirements.txt
+          pip install openapi-spec-validator oasdiff
+
+      - name: Generate base OpenAPI spec
+        run: |
+          cd base
+          python - << 'EOF'
+          import json
+          import sys
+          sys.path.insert(0, '.')
+          import unittest.mock as mock
+
+          with mock.patch('src.db.init_db'), \
+               mock.patch('src.auth.JWKSCache.get_keys', return_value={}):
+              from src.app import app
+              spec = app.openapi()
+
+          with open('openapi-base.json', 'w') as f:
+              json.dump(spec, f, indent=2)
+          EOF
+          mv openapi-base.json ../
+        env:
+          PYTHONPATH: .
+
+      - name: Generate PR OpenAPI spec
+        run: |
+          cd pr
+          python - << 'EOF'
+          import json
+          import sys
+          sys.path.insert(0, '.')
+          import unittest.mock as mock
+
+          with mock.patch('src.db.init_db'), \
+               mock.patch('src.auth.JWKSCache.get_keys', return_value={}):
+              from src.app import app
+              spec = app.openapi()
+
+          with open('openapi-pr.json', 'w') as f:
+              json.dump(spec, f, indent=2)
+          EOF
+          mv openapi-pr.json ../
+        env:
+          PYTHONPATH: .
+
+      - name: Compare OpenAPI specs
+        id: diff
+        run: |
+          # Install oasdiff
+          go install github.com/tufin/oasdiff@latest
+          export PATH=$PATH:$(go env GOPATH)/bin
+
+          # Run breaking change detection
+          set +e
+          oasdiff breaking openapi-base.json openapi-pr.json --format json > breaking-changes.json 2>&1
+          RESULT=$?
+          set -e
+
+          # Check for breaking changes
+          if [ -s breaking-changes.json ] && [ "$(cat breaking-changes.json)" != "[]" ] && [ "$(cat breaking-changes.json)" != "null" ]; then
+            echo "has_breaking=true" >> $GITHUB_OUTPUT
+            echo "Breaking changes detected!"
+            cat breaking-changes.json
+          else
+            echo "has_breaking=false" >> $GITHUB_OUTPUT
+            echo "No breaking changes detected"
+          fi
+
+          # Generate full diff
+          oasdiff diff openapi-base.json openapi-pr.json --format text > api-diff.txt || true
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let breakingChanges = '[]';
+            let apiDiff = 'No changes detected';
+
+            try {
+              breakingChanges = fs.readFileSync('breaking-changes.json', 'utf8');
+            } catch (e) {}
+
+            try {
+              apiDiff = fs.readFileSync('api-diff.txt', 'utf8');
+            } catch (e) {}
+
+            const hasBreaking = '${{ steps.diff.outputs.has_breaking }}' === 'true';
+
+            let body = '## 🔍 API Change Analysis\n\n';
+
+            if (hasBreaking) {
+              body += '### ⚠️ Breaking Changes Detected!\n\n';
+              body += 'The following breaking changes were found:\n\n';
+              body += '```json\n' + breakingChanges + '\n```\n\n';
+              body += '> **Note:** Breaking changes may affect existing API consumers. Please ensure this is intentional and documented.\n\n';
+            } else {
+              body += '### ✅ No Breaking Changes\n\n';
+            }
+
+            if (apiDiff && apiDiff.trim()) {
+              body += '<details>\n<summary>📋 Full API Diff</summary>\n\n';
+              body += '```\n' + apiDiff.substring(0, 60000) + '\n```\n';
+              body += '</details>\n';
+            }
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('API Change Analysis')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
+            }
+
+      - name: Fail on breaking changes (optional)
+        if: steps.diff.outputs.has_breaking == 'true'
+        run: |
+          echo "::warning::Breaking API changes detected. Review required."
+          # Uncomment to fail the check:
+          # exit 1

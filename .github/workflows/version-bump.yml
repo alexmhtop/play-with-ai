@@ -1,0 +1,221 @@
+name: Version Bump
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  determine-bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      bump_type: ${{ steps.analyze.outputs.bump_type }}
+      current_version: ${{ steps.version.outputs.current }}
+      new_version: ${{ steps.version.outputs.new }}
+      should_bump: ${{ steps.analyze.outputs.should_bump }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get current version
+        id: version
+        run: |
+          # Get latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          CURRENT_VERSION="${LATEST_TAG#v}"
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT_VERSION"
+
+      - name: Analyze commits for version bump
+        id: analyze
+        run: |
+          BUMP_TYPE="${{ inputs.bump_type || 'auto' }}"
+
+          if [ "$BUMP_TYPE" = "auto" ]; then
+            # Get commits since last tag
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+            if [ -z "$LATEST_TAG" ]; then
+              COMMITS=$(git log --oneline)
+            else
+              COMMITS=$(git log "${LATEST_TAG}..HEAD" --oneline)
+            fi
+
+            if [ -z "$COMMITS" ]; then
+              echo "No new commits since last tag"
+              echo "should_bump=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            # Analyze commit messages for conventional commits
+            HAS_BREAKING=$(echo "$COMMITS" | grep -iE '(BREAKING CHANGE|!:)' || true)
+            HAS_FEAT=$(echo "$COMMITS" | grep -iE '^[a-f0-9]+ feat' || true)
+            HAS_FIX=$(echo "$COMMITS" | grep -iE '^[a-f0-9]+ fix' || true)
+
+            if [ -n "$HAS_BREAKING" ]; then
+              BUMP_TYPE="major"
+            elif [ -n "$HAS_FEAT" ]; then
+              BUMP_TYPE="minor"
+            elif [ -n "$HAS_FIX" ]; then
+              BUMP_TYPE="patch"
+            else
+              echo "No version-affecting commits found"
+              echo "should_bump=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "should_bump=true" >> $GITHUB_OUTPUT
+          echo "Determined bump type: $BUMP_TYPE"
+
+      - name: Calculate new version
+        if: steps.analyze.outputs.should_bump == 'true'
+        run: |
+          CURRENT="${{ steps.version.outputs.current }}"
+          BUMP_TYPE="${{ steps.analyze.outputs.bump_type }}"
+
+          MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+          MINOR=$(echo "$CURRENT" | cut -d. -f2)
+          PATCH=$(echo "$CURRENT" | cut -d. -f3)
+
+          case "$BUMP_TYPE" in
+            major)
+              NEW_VERSION="$((MAJOR + 1)).0.0"
+              ;;
+            minor)
+              NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"
+              ;;
+            patch)
+              NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+              ;;
+          esac
+
+          echo "new=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION"
+
+  create-bump-pr:
+    needs: determine-bump
+    if: needs.determine-bump.outputs.should_bump == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create version bump branch
+        run: |
+          BRANCH="version-bump/v${{ needs.determine-bump.outputs.new_version }}"
+          git checkout -b "$BRANCH"
+
+      - name: Update version files
+        run: |
+          NEW_VERSION="${{ needs.determine-bump.outputs.new_version }}"
+
+          # Update pyproject.toml if it exists
+          if [ -f "pyproject.toml" ]; then
+            sed -i "s/^version = .*/version = \"$NEW_VERSION\"/" pyproject.toml
+          fi
+
+          # Update __version__ in src/__init__.py if it exists
+          if [ -f "src/__init__.py" ]; then
+            sed -i "s/__version__ = .*/__version__ = \"$NEW_VERSION\"/" src/__init__.py
+          fi
+
+          # Update VERSION file if it exists
+          if [ -f "VERSION" ]; then
+            echo "$NEW_VERSION" > VERSION
+          fi
+
+          # Update package.json if it exists (for mixed projects)
+          if [ -f "package.json" ]; then
+            sed -i "s/\"version\": \".*\"/\"version\": \"$NEW_VERSION\"/" package.json
+          fi
+
+          echo "Updated version to $NEW_VERSION"
+
+      - name: Commit and push
+        run: |
+          git add -A
+          if git diff --staged --quiet; then
+            echo "No version files to update"
+          else
+            git commit -m "chore: bump version to v${{ needs.determine-bump.outputs.new_version }}"
+            git push origin "version-bump/v${{ needs.determine-bump.outputs.new_version }}"
+          fi
+
+      - name: Create pull request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const newVersion = '${{ needs.determine-bump.outputs.new_version }}';
+            const currentVersion = '${{ needs.determine-bump.outputs.current_version }}';
+            const bumpType = '${{ needs.determine-bump.outputs.bump_type }}';
+
+            // Check if PR already exists
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:version-bump/v${newVersion}`,
+              state: 'open'
+            });
+
+            if (prs.length > 0) {
+              console.log(`PR already exists: #${prs[0].number}`);
+              return;
+            }
+
+            const pr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `chore: bump version to v${newVersion}`,
+              body: `## Version Bump
+
+            | Current | New | Type |
+            |---------|-----|------|
+            | v${currentVersion} | v${newVersion} | ${bumpType} |
+
+            This PR was automatically created based on conventional commit analysis.
+
+            ### What's Changed
+            See the commits since v${currentVersion} for details.
+
+            ### After Merge
+            A new release will be created automatically with tag \`v${newVersion}\`.
+
+            ---
+            _This PR was created automatically by the version-bump workflow._`,
+              head: `version-bump/v${newVersion}`,
+              base: 'main'
+            });
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.data.number,
+              labels: ['version-bump', 'automated']
+            });
+
+            console.log(`Created PR: #${pr.data.number}`);

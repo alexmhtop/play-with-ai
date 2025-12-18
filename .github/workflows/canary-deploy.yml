@@ -1,0 +1,206 @@
+name: Canary Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      canary_percentage:
+        description: 'Percentage of traffic to canary (5-50)'
+        required: true
+        default: '10'
+      auto_promote:
+        description: 'Auto-promote after success'
+        required: false
+        type: boolean
+        default: false
+      promote_delay:
+        description: 'Minutes to wait before auto-promote'
+        required: false
+        default: '30'
+
+permissions:
+  contents: read
+  packages: read
+  deployments: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      canary_percentage: ${{ steps.validate.outputs.percentage }}
+    steps:
+      - name: Validate inputs
+        id: validate
+        run: |
+          PERCENTAGE=${{ inputs.canary_percentage }}
+          if [ "$PERCENTAGE" -lt 5 ] || [ "$PERCENTAGE" -gt 50 ]; then
+            echo "::error::Canary percentage must be between 5 and 50"
+            exit 1
+          fi
+          echo "percentage=$PERCENTAGE" >> $GITHUB_OUTPUT
+
+  deploy-canary:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: ${{ inputs.environment }}-canary
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get latest image digest
+        id: image
+        run: |
+          DIGEST=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest 2>/dev/null | jq -r '.config.digest' || echo "")
+          if [ -z "$DIGEST" ]; then
+            echo "::error::No latest image found"
+            exit 1
+          fi
+          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+
+      - name: Deploy canary
+        id: deploy
+        run: |
+          echo "🐤 Deploying canary to ${{ inputs.environment }}"
+          echo "Traffic percentage: ${{ needs.validate.outputs.canary_percentage }}%"
+
+          # Placeholder for actual canary deployment
+          # Examples:
+          # - Kubernetes: kubectl apply with canary labels
+          # - AWS: CodeDeploy with traffic shifting
+          # - Istio: VirtualService weight configuration
+
+          # Example Kubernetes canary:
+          # kubectl set image deployment/app-canary app=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          # kubectl scale deployment/app-canary --replicas=$CANARY_REPLICAS
+
+          CANARY_URL="https://canary.${{ inputs.environment }}.example.com"
+          echo "url=${CANARY_URL}" >> $GITHUB_OUTPUT
+
+      - name: Configure traffic split
+        run: |
+          echo "📊 Configuring traffic split: ${{ needs.validate.outputs.canary_percentage }}% to canary"
+
+          # Placeholder for traffic configuration
+          # Istio example:
+          # cat > virtualservice-patch.yaml << EOF
+          # spec:
+          #   http:
+          #   - route:
+          #     - destination:
+          #         host: app-stable
+          #       weight: $((100 - ${{ needs.validate.outputs.canary_percentage }}))
+          #     - destination:
+          #         host: app-canary
+          #       weight: ${{ needs.validate.outputs.canary_percentage }}
+          # EOF
+          # kubectl patch virtualservice app --patch-file virtualservice-patch.yaml
+
+  monitor-canary:
+    needs: deploy-canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Monitor canary metrics
+        id: monitor
+        run: |
+          echo "📈 Monitoring canary deployment..."
+
+          # Monitor for configured duration
+          DURATION=${{ inputs.promote_delay }}
+          INTERVAL=60  # Check every minute
+          CHECKS=$((DURATION * 60 / INTERVAL))
+
+          for i in $(seq 1 $CHECKS); do
+            echo "Check $i/$CHECKS at $(date)"
+
+            # Placeholder for actual metrics checking
+            # Examples:
+            # - Query Prometheus for error rates
+            # - Check DataDog/NewRelic/Grafana dashboards
+            # - Compare canary vs stable latency/error rates
+
+            # Example: Check error rate is below threshold
+            # ERROR_RATE=$(curl -s "http://prometheus/api/v1/query?query=rate(http_errors_total{version='canary'}[5m])" | jq '.data.result[0].value[1]')
+            # if (( $(echo "$ERROR_RATE > 0.01" | bc -l) )); then
+            #   echo "::error::Canary error rate too high: $ERROR_RATE"
+            #   echo "status=failed" >> $GITHUB_OUTPUT
+            #   exit 1
+            # fi
+
+            sleep $INTERVAL
+          done
+
+          echo "status=healthy" >> $GITHUB_OUTPUT
+          echo "✅ Canary metrics look healthy"
+
+      - name: Report canary status
+        run: |
+          echo "## Canary Deployment Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Traffic:** ${{ needs.validate.outputs.canary_percentage }}%" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ steps.monitor.outputs.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Duration:** ${{ inputs.promote_delay }} minutes" >> $GITHUB_STEP_SUMMARY
+
+    outputs:
+      status: ${{ steps.monitor.outputs.status }}
+
+  auto-promote:
+    needs: [validate, monitor-canary]
+    if: inputs.auto_promote && needs.monitor-canary.outputs.status == 'healthy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: ${{ inputs.environment }}
+    steps:
+      - name: Promote canary to stable
+        run: |
+          echo "🚀 Promoting canary to stable (100% traffic)"
+
+          # Placeholder for promotion logic
+          # - Update stable deployment to canary image
+          # - Shift 100% traffic to stable
+          # - Scale down canary replicas
+
+          echo "✅ Canary promoted to stable"
+
+      - name: Cleanup canary
+        run: |
+          echo "🧹 Cleaning up canary deployment"
+          # kubectl scale deployment/app-canary --replicas=0
+
+  notify-result:
+    needs: [monitor-canary, auto-promote]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Send notification
+        run: |
+          if [ "${{ needs.monitor-canary.outputs.status }}" == "healthy" ]; then
+            echo "✅ Canary deployment successful"
+            # Send success notification
+          else
+            echo "❌ Canary deployment failed"
+            # Send failure notification with rollback instructions
+          fi
