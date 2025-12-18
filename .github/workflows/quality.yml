@@ -41,6 +41,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
       - name: Install Postgres client
         run: |
           sudo apt-get update
@@ -78,6 +79,11 @@ jobs:
     needs: lint_and_test
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
       - name: Prepare env
         run: |
           if [ -f .env.example ]; then
@@ -157,6 +163,13 @@ jobs:
           exit 1
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+      - name: Cache Terraform providers
+        uses: actions/cache@v4
+        with:
+          path: infra/terraform/keycloak/.terraform/providers
+          key: terraform-keycloak-${{ hashFiles('infra/terraform/keycloak/.terraform.lock.hcl') }}
+          restore-keys: |
+            terraform-keycloak-
       - name: Create Keycloak realm via Terraform
         run: |
           cd infra/terraform/keycloak
@@ -245,6 +258,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
+      - name: Cache Terraform providers
+        uses: actions/cache@v4
+        with:
+          path: infra/terraform/keycloak/.terraform/providers
+          key: terraform-keycloak-${{ hashFiles('infra/terraform/keycloak/.terraform.lock.hcl') }}
+          restore-keys: |
+            terraform-keycloak-
       - name: Terraform fmt/validate
         run: |
           terraform fmt -check -recursive infra
