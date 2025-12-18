@@ -177,69 +177,71 @@ jobs:
           PREVIOUS_TAG: ${{ needs.determine-bump.outputs.previous_tag }}
         run: |
           python - <<'PY'
-          from textwrap import dedent
-          exec(dedent("""
-          import datetime
-          import os
-          import re
-          import subprocess
-          from pathlib import Path
+          import textwrap
 
-          new_version = os.environ["NEW_VERSION"]
-          previous_tag = os.environ.get("PREVIOUS_TAG", "")
-          header = "# Changelog\n\n"
+          code = '''
+            import datetime
+            import os
+            import re
+            import subprocess
+            from pathlib import Path
 
-          if previous_tag:
-              rev_range = f"{previous_tag}..HEAD"
-          else:
-              rev_range = ""
-          args = ["git", "log"]
-          if rev_range:
-              args.append(rev_range)
-          args.extend(["--pretty=format:%s"])
-          result = subprocess.run(args, check=True, capture_output=True, text=True)
-          messages = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-          if not messages:
-              messages = ["chore: maintenance"]
+            new_version = os.environ["NEW_VERSION"]
+            previous_tag = os.environ.get("PREVIOUS_TAG", "")
+            header = "# Changelog\n\n"
 
-          categories = {"Added": [], "Fixed": [], "Changed": []}
-          pattern = re.compile(r"^(?P<type>\w+)(?:\([^)]*\))?!?:\s*")
+            if previous_tag:
+                rev_range = f"{previous_tag}..HEAD"
+            else:
+                rev_range = ""
+            args = ["git", "log"]
+            if rev_range:
+                args.append(rev_range)
+            args.extend(["--pretty=format:%s"])
+            result = subprocess.run(args, check=True, capture_output=True, text=True)
+            messages = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+            if not messages:
+                messages = ["chore: maintenance"]
 
-          for message in messages:
-              clean = pattern.sub("", message)
-              lower = message.lower()
-              if lower.startswith("feat"):
-                  categories["Added"].append(clean)
-              elif lower.startswith("fix"):
-                  categories["Fixed"].append(clean)
-              else:
-                  categories["Changed"].append(clean)
+            categories = {"Added": [], "Fixed": [], "Changed": []}
+            pattern = re.compile(r"^(?P<type>\w+)(?:\([^)]*\))?!?:\s*")
 
-          entry_lines = [f"## v{new_version} - {datetime.date.today().isoformat()}\n"]
-          for section in ("Added", "Fixed", "Changed"):
-              items = categories[section]
-              if not items:
-                  continue
-              entry_lines.append(f"### {section}")
-              entry_lines.extend(f"- {item}" for item in items)
-              entry_lines.append("")
-          if len(entry_lines) == 1:
-              entry_lines.append("- Maintenance updates")
-          entry_lines.append("")
-          entry = "\n".join(entry_lines)
+            for message in messages:
+                clean = pattern.sub("", message)
+                lower = message.lower()
+                if lower.startswith("feat"):
+                    categories["Added"].append(clean)
+                elif lower.startswith("fix"):
+                    categories["Fixed"].append(clean)
+                else:
+                    categories["Changed"].append(clean)
 
-          path = Path("CHANGELOG.md")
-          if path.exists():
-              text = path.read_text()
-              if text.startswith(header):
-                  body = text[len(header):].lstrip("\n")
-              else:
-                  body = text
-              new_text = header + entry + body
-          else:
-              new_text = header + entry
-          path.write_text(new_text)
-          """))
+            entry_lines = [f"## v{new_version} - {datetime.date.today().isoformat()}\n"]
+            for section in ("Added", "Fixed", "Changed"):
+                items = categories[section]
+                if not items:
+                    continue
+                entry_lines.append(f"### {section}")
+                entry_lines.extend(f"- {item}" for item in items)
+                entry_lines.append("")
+            if len(entry_lines) == 1:
+                entry_lines.append("- Maintenance updates")
+            entry_lines.append("")
+            entry = "\n".join(entry_lines)
+
+            path = Path("CHANGELOG.md")
+            if path.exists():
+                text = path.read_text()
+                if text.startswith(header):
+                    body = text[len(header):].lstrip("\n")
+                else:
+                    body = text
+                new_text = header + entry + body
+            else:
+                new_text = header + entry
+            path.write_text(new_text)
+          '''
+          exec(textwrap.dedent(code))
           PY
 
 
