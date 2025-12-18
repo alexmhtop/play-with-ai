@@ -1,0 +1,35 @@
+# CODEOWNERS - Define code ownership for automatic review requests
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+*                           @Moderation-is-good
+
+# Python source code
+/src/                       @Moderation-is-good
+/tests/                     @Moderation-is-good
+
+# Infrastructure and DevOps
+/infra/                     @Moderation-is-good
+/docker-compose*.yml        @Moderation-is-good
+/Dockerfile                 @Moderation-is-good
+
+# CI/CD workflows
+/.github/workflows/         @Moderation-is-good
+/.github/                   @Moderation-is-good
+
+# Security-sensitive files
+/src/auth.py                @Moderation-is-good
+/src/secrets.py             @Moderation-is-good
+/infra/terraform/vault/     @Moderation-is-good
+/infra/terraform/keycloak/  @Moderation-is-good
+
+# Database migrations
+/alembic/                   @Moderation-is-good
+
+# Observability
+/observability/             @Moderation-is-good
+/src/otel.py                @Moderation-is-good
+
+# Documentation
+*.md                        @Moderation-is-good
+/docs/                      @Moderation-is-good

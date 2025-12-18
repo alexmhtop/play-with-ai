@@ -1,0 +1,64 @@
+# Configuration for actions/labeler
+
+python:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/**/*.py'
+          - 'tests/**/*.py'
+          - 'requirements*.txt'
+          - 'pyproject.toml'
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'tests/**'
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
+          - 'docs/**'
+
+infrastructure:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'infra/**'
+          - 'docker-compose*.yml'
+          - 'Dockerfile'
+
+terraform:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'infra/terraform/**'
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
+
+docker:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'Dockerfile'
+          - '.dockerignore'
+          - 'docker-compose*.yml'
+
+observability:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'observability/**'
+          - 'src/otel.py'
+
+security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/auth.py'
+          - 'src/secrets.py'
+          - 'src/ratelimit.py'
+
+database:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'alembic/**'
+          - 'src/db.py'
+          - 'src/entities.py'
