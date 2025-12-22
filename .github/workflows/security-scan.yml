@@ -68,7 +68,7 @@ jobs:
           output: 'trivy-results.sarif'
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results.sarif'
 
@@ -93,7 +93,7 @@ jobs:
           sarif_file: tfsec-results.sarif
 
       - name: Upload tfsec results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'tfsec-results.sarif'
         if: always()
@@ -108,7 +108,7 @@ jobs:
           output_file_path: checkov-results.sarif
 
       - name: Upload Checkov results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'checkov-results.sarif'
         if: always()
@@ -151,7 +151,7 @@ jobs:
         run: bandit -r src -f sarif -o bandit-results.sarif || true
 
       - name: Upload Bandit results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'bandit-results.sarif'
 
@@ -162,7 +162,7 @@ jobs:
           generateSarif: true
 
       - name: Upload Semgrep results
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: semgrep.sarif
         if: always()
