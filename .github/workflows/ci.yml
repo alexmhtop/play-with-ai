@@ -87,7 +87,7 @@ jobs:
           enable-cache: true
 
       - name: Cache virtualenv
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .venv
           key: venv-${{ runner.os }}-py${{ matrix.python-version }}-${{ env.UV_VERSION }}-${{ hashFiles('requirements.txt', 'pyproject.toml') }}

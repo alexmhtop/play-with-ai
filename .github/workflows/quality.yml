@@ -89,7 +89,7 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - name: Cache virtualenv
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .venv
           key: venv-${{ runner.os }}-${{ env.UV_VERSION }}-${{ hashFiles('requirements.txt', 'pyproject.toml') }}
@@ -154,7 +154,7 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - name: Cache virtualenv
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .venv
           key: venv-${{ runner.os }}-${{ env.UV_VERSION }}-${{ hashFiles('requirements.txt', 'pyproject.toml') }}
@@ -270,7 +270,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
       - name: Cache Terraform providers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: infra/terraform/keycloak/.terraform/providers
           key: terraform-keycloak-${{ hashFiles('infra/terraform/keycloak/.terraform.lock.hcl') }}
@@ -415,7 +415,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: hashicorp/setup-terraform@v3
       - name: Cache Terraform providers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             infra/terraform/keycloak/.terraform/providers
@@ -464,7 +464,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
       - name: Cache Terraform providers (vault)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: infra/terraform/vault/.terraform/providers
           key: terraform-vault-${{ hashFiles('infra/terraform/vault/.terraform.lock.hcl') }}
