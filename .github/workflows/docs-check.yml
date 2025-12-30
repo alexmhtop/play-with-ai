@@ -30,7 +30,7 @@ jobs:
           fi
           echo "files=$FILES" >> "$GITHUB_OUTPUT"
       - name: Lychee link check
-        uses: lycheeverse/lychee-action@v2.3.0
+        uses: lycheeverse/lychee-action@v2.7.0
         with:
           args: --no-progress --timeout 20 ${{ steps.md.outputs.files }}
         env:
