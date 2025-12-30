@@ -8,7 +8,7 @@ psycopg==3.2.3
 pytest==9.0.2
 pytest-cov==7.0.0
 alembic==1.17.2
-hypothesis==6.119.4
+hypothesis==6.148.8
 bandit==1.9.2
 ruff==0.14.10
 mypy==1.19.1
