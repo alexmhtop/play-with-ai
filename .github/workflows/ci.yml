@@ -154,7 +154,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build image (load for scan)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
@@ -181,7 +181,7 @@ jobs:
           if-no-files-found: error
 
       - name: Build and push image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
