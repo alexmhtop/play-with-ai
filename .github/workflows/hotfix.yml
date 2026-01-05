@@ -70,7 +70,7 @@ jobs:
           echo "Created branch: $BRANCH_NAME"
 
       - name: Create tracking issue
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const issue = await github.rest.issues.create({

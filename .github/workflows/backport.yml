@@ -96,7 +96,7 @@ jobs:
           echo "branch=$BACKPORT_BRANCH" >> $GITHUB_OUTPUT
 
       - name: Comment on original PR with backport link
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const targetBranch = '${{ matrix.target }}';
@@ -146,7 +146,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Comment on PR about failure
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             await github.rest.issues.createComment({
